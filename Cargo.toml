@@ -1,0 +1,27 @@
+[package]
+name = "gptftw-back"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies.sqlx]
+version = "0.5"
+default-features = false
+features = ["macros", "postgres", "runtime-tokio-rustls", "migrate"]
+
+[dependencies]
+anyhow = "1.0.70"
+async-trait = "0.1.68"
+derive_builder = "0.12.0"
+num = "0.4.0"
+ormx = "0.10.0"
+# sqlx = { version = "0.6.3", features = ["runtime-tokio-rustls", "postgres", "bigdecimal"] }
+tokio = { version = "1.27.0", features = ["macros"] }
+
+[profile.release]
+strip = true  # Automatically strip symbols from the binary.
+lto = true
+panic = "abort"
+
+

@@ -1,0 +1,50 @@
+{
+  "version": 0,
+  "root_name": "gptftw-back",
+  "workspace_crates": {
+    "gptftw-back": {
+      "full_path": "/Users/shmendez/dev/shane/gptftw-back/Cargo.toml",
+      "dependencies": {
+        "sqlx": {
+          "original_features": [
+            "macros",
+            "postgres",
+            "migrate",
+            "runtime-tokio-rustls",
+            "_rt-tokio"
+          ],
+          "successfully_removed_features": [
+            "_rt-tokio"
+          ],
+          "unsuccessfully_removed_features": [
+            "macros",
+            "migrate",
+            "postgres",
+            "runtime-tokio-rustls"
+          ]
+        },
+        "derive_builder": {
+          "original_features": [
+            "std"
+          ],
+          "successfully_removed_features": [
+            "std"
+          ],
+          "unsuccessfully_removed_features": []
+        },
+        "tokio": {
+          "original_features": [
+            "macros",
+            "tokio-macros"
+          ],
+          "successfully_removed_features": [
+            "tokio-macros"
+          ],
+          "unsuccessfully_removed_features": [
+            "macros"
+          ]
+        }
+      }
+    }
+  }
+}
