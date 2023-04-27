@@ -5,13 +5,6 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sqlx::{types::BigDecimal, Pool, Postgres};
 
-// #[derive(Debug, Builder)]
-// #[builder(derive(Debug))]
-// pub struct PendingJob {
-//     job_id: IndexItem<JobBuilder>,
-//     user_id: IndexItem<UserBuilder>,
-//     proposal_id: IndexItem<ProposalBuilder>,
-// }
 #[derive(Debug, Clone)]
 pub struct User {
     user_id: i32,
@@ -89,7 +82,7 @@ pub struct Job {
     title: String,
     website: String,
     description: String,
-    budget: BigDecimal,
+    budget: Option<BigDecimal>,
     hourly: Option<BigDecimal>,
     post_url: String,
 }
@@ -103,15 +96,24 @@ impl FromDatabase<i32> for Job {
         let row = sqlx::query!("select * from jobs where job_id = $1", id,)
             .fetch_one(&mut conn)
             .await?;
-        // let user = UserBuilder::default()
-        //     .user_id(row.user_id)
-        //     .username(row.username)
-        //     .build()?;
-        // Ok(user)
-        todo!()
+        Ok(Job {
+            job_id: row.job_id,
+            title: row.title,
+            website: row.website,
+            description: row.description,
+            budget: row.budget,
+            hourly: row.hourly,
+            post_url: row.post_url,
+        })
     }
 }
 
+#[derive(Debug)]
+pub struct PendingJob {
+    job_id: IndexItem<Job, i32>,
+    user_id: IndexItem<User, i32>,
+    proposal_id: IndexItem<Proposal, i32>,
+}
 struct Database {
     pool: Pool<Postgres>,
 }

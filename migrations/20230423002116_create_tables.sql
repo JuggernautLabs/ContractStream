@@ -8,12 +8,12 @@ CREATE TABLE IF NOT EXISTS Users (
 
 CREATE TABLE IF NOT EXISTS Jobs (
     job_id SERIAL PRIMARY KEY,
-    title VARCHAR(255),
-    website VARCHAR(255),
-    description TEXT,
-    budget NUMERIC,
+    title VARCHAR(255) NOT NULL,
+    website VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL,
+    budget NUMERIC NULL,
     hourly NUMERIC NULL,
-    post_url VARCHAR(255)
+    post_url VARCHAR(255) NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS Proposals (
