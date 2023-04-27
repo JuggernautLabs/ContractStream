@@ -1,38 +1,19 @@
 #![allow(dead_code)]
 use crate::db::*;
-use anyhow::Context;
 use async_trait::async_trait;
 use derive_builder::Builder;
-use num::cast::FromPrimitive;
-use sqlx::{postgres::PgRow, types::BigDecimal, Pool, Postgres, Row};
-macro_rules! format_query {
-    ($table: expr, $id_name: expr, ($returns: tt)) => {
-        format!(
-            "select {} from {} where {} = $1",
-            $returns, $table, $id_name
-        )
-    };
-    ($table: expr, $id_name: expr) => {
-        format!("select * from {} where {} = $1", $table, $id_name)
-    };
-}
-#[derive(Debug, Builder)]
-pub struct Proposal {
-    proposal_id: i32,
-    user_id: IndexItem<UserBuilder>,
-    job_id: IndexItem<JobBuilder>,
-}
+use sqlx::{types::BigDecimal, Pool, Postgres};
 
-#[derive(Debug, Builder)]
-pub struct PendingJob {
-    job_id: IndexItem<JobBuilder>,
-    user_id: IndexItem<UserBuilder>,
-    proposal_id: IndexItem<ProposalBuilder>,
-}
+// #[derive(Debug, Builder)]
+// #[builder(derive(Debug))]
+// pub struct PendingJob {
+//     job_id: IndexItem<JobBuilder>,
+//     user_id: IndexItem<UserBuilder>,
+//     proposal_id: IndexItem<ProposalBuilder>,
+// }
 #[derive(Debug, Builder, Clone)]
 #[builder(public)]
 #[builder(derive(Debug))]
-// #[builder(build_fn(validate = "Self::validate"))]
 pub struct User {
     #[builder(field(type = "i32"), setter(strip_option))]
     user_id: i32,
@@ -42,6 +23,71 @@ pub struct User {
         setter(strip_option, name = "password")
     )]
     password_digest: (),
+}
+
+#[async_trait]
+impl FromDatabase<i32> for User {
+    type OK = User;
+    type ERROR = anyhow::Error;
+
+    fn id(&self) -> i32 {
+        self.user_id
+    }
+    fn set_id(id: i32) -> Self {
+        Self::default().user_id(id).clone()
+    }
+
+    async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<User, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let row = sqlx::query!(
+            "select user_id, username from users where user_id = $1",
+            self.user_id,
+        )
+        .fetch_one(&mut conn)
+        .await?;
+        let user = UserBuilder::default()
+            .user_id(row.user_id)
+            .username(row.username)
+            .build()?;
+        Ok(user)
+    }
+}
+
+#[derive(Debug, Clone, Builder)]
+#[builder(derive(Debug), private)]
+pub struct Proposal {
+    #[builder(field(type = "i32"))]
+    proposal_id: i32,
+    #[builder(field(type = "i32", build = "self.user_id.into()"))]
+    user_id: IndexItem<User, i32>,
+    #[builder(field(type = "i32", build = "self.job_id.into()"))]
+    job_id: IndexItem<JobBuilder, i32>,
+    proposal: String,
+}
+
+#[async_trait]
+impl FromDatabase<i32> for ProposalBuilder {
+    type OK = Proposal;
+    type ERROR = anyhow::Error;
+
+    fn id(&self) -> i32 {
+        self.proposal_id
+    }
+    fn set_id(id: i32) -> Self {
+        Self::default().proposal_id(id).clone()
+    }
+
+    async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<Proposal, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let row = sqlx::query_as!(
+            ProposalBuilder,
+            "select * from Proposals where proposal_id = $1",
+            self.proposal_id,
+        )
+        .fetch_one(&mut conn)
+        .await?;
+        Ok(row.build()?)
+    }
 }
 
 #[derive(Debug, Builder, Clone)]
@@ -63,32 +109,7 @@ pub struct Job {
 }
 
 #[async_trait]
-impl FromDatabase for ProposalBuilder {
-    type OK = Proposal;
-    type ERROR = anyhow::Error;
-
-    fn id(&self) -> i32 {
-        self.job_id
-    }
-    fn set_id(id: i32) -> Self {
-        ProposalBuilder::default().job_id(id).clone()
-    }
-
-    async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<Proposal, anyhow::Error> {
-        let mut conn = pool.acquire().await?;
-        let row = sqlx::query_as!(
-            ProposalBuilder,
-            "select * from ProposalBuilder where job_id = $1",
-            self.job_id,
-        )
-        .fetch_one(&mut conn)
-        .await?;
-        todo!()
-    }
-}
-
-#[async_trait]
-impl FromDatabase for JobBuilder {
+impl FromDatabase<i32> for JobBuilder {
     type OK = Job;
     type ERROR = anyhow::Error;
 
@@ -96,7 +117,7 @@ impl FromDatabase for JobBuilder {
         self.job_id
     }
     fn set_id(id: i32) -> Self {
-        JobBuilder::default().job_id(id).clone()
+        Self::default().job_id(id).clone()
     }
     async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<Job, anyhow::Error> {
         let mut conn = pool.acquire().await?;
@@ -115,25 +136,7 @@ impl FromDatabase for JobBuilder {
         todo!()
     }
 }
-#[async_trait]
-impl FromDatabase for UserBuilder {
-    type OK = User;
-    type ERROR = anyhow::Error;
-    async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<User, anyhow::Error> {
-        let mut conn = pool.acquire().await?;
-        let row = sqlx::query!(
-            "select user_id, username from users where user_id = $1",
-            self.user_id,
-        )
-        .fetch_one(&mut conn)
-        .await?;
-        let user = UserBuilder::default()
-            .user_id(row.user_id)
-            .username(row.username)
-            .build()?;
-        Ok(user)
-    }
-}
+
 struct Database {
     pool: Pool<Postgres>,
 }

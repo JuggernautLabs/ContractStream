@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS Jobs (
 
 CREATE TABLE IF NOT EXISTS Proposals (
     proposal_id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES Users(user_id),
-    job_id INTEGER REFERENCES Jobs(job_id),
+    user_id INTEGER REFERENCES Users(user_id) NOT NULL,
+    job_id INTEGER REFERENCES Jobs(job_id) NOT NULL,
     proposal TEXT
 );
 
