@@ -1,7 +1,8 @@
 #![allow(dead_code)]
+
 use crate::db::*;
 use async_trait::async_trait;
-use derive_builder::Builder;
+use serde::{Deserialize, Serialize};
 use sqlx::{types::BigDecimal, Pool, Postgres};
 
 // #[derive(Debug, Builder)]
@@ -11,123 +12,97 @@ use sqlx::{types::BigDecimal, Pool, Postgres};
 //     user_id: IndexItem<UserBuilder>,
 //     proposal_id: IndexItem<ProposalBuilder>,
 // }
-#[derive(Debug, Builder, Clone)]
-#[builder(public)]
-#[builder(derive(Debug))]
+#[derive(Debug, Clone)]
 pub struct User {
-    #[builder(field(type = "i32"), setter(strip_option))]
     user_id: i32,
     pub username: String,
-    #[builder(
-        field(type = "Option<String>", build = "()"),
-        setter(strip_option, name = "password")
-    )]
     password_digest: (),
 }
 
 #[async_trait]
 impl FromDatabase<i32> for User {
-    type OK = User;
     type ERROR = anyhow::Error;
 
-    fn id(&self) -> i32 {
-        self.user_id
-    }
-    fn set_id(id: i32) -> Self {
-        Self::default().user_id(id).clone()
-    }
-
-    async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<User, anyhow::Error> {
+    async fn build_from_index(id: &i32, pool: Pool<Postgres>) -> Result<User, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let row = sqlx::query!(
-            "select user_id, username from users where user_id = $1",
-            self.user_id,
-        )
-        .fetch_one(&mut conn)
-        .await?;
-        let user = UserBuilder::default()
-            .user_id(row.user_id)
-            .username(row.username)
-            .build()?;
+        let row = sqlx::query!("select user_id, username from users where user_id = $1", id)
+            .fetch_one(&mut conn)
+            .await?;
+        let user = User {
+            username: row.username,
+            user_id: row.user_id,
+            password_digest: (),
+        };
         Ok(user)
     }
 }
 
-#[derive(Debug, Clone, Builder)]
-#[builder(derive(Debug), private)]
+impl User {
+    pub async fn add_user(
+        username: String,
+        password: String,
+        pool: Pool<Postgres>,
+    ) -> Result<Self, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let record = sqlx::query!(
+            r" INSERT INTO Users (username, password_digest) VALUES ($1,crypt($2, gen_salt('bf'))) RETURNING user_id",
+            username,
+            password,
+        ).fetch_one(&mut conn).await?;
+        Ok(User {
+            username: username,
+            user_id: record.user_id,
+            password_digest: (),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Proposal {
-    #[builder(field(type = "i32"))]
     proposal_id: i32,
-    #[builder(field(type = "i32", build = "self.user_id.into()"))]
     user_id: IndexItem<User, i32>,
-    #[builder(field(type = "i32", build = "self.job_id.into()"))]
-    job_id: IndexItem<JobBuilder, i32>,
-    proposal: String,
+    job_id: IndexItem<Job, i32>,
+    proposal: Option<String>,
 }
 
 #[async_trait]
-impl FromDatabase<i32> for ProposalBuilder {
-    type OK = Proposal;
+impl FromDatabase<i32> for Proposal {
     type ERROR = anyhow::Error;
 
-    fn id(&self) -> i32 {
-        self.proposal_id
-    }
-    fn set_id(id: i32) -> Self {
-        Self::default().proposal_id(id).clone()
-    }
-
-    async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<Proposal, anyhow::Error> {
+    async fn build_from_index(id: &i32, pool: Pool<Postgres>) -> Result<Proposal, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let row = sqlx::query_as!(
-            ProposalBuilder,
-            "select * from Proposals where proposal_id = $1",
-            self.proposal_id,
-        )
-        .fetch_one(&mut conn)
-        .await?;
-        Ok(row.build()?)
+        let row = sqlx::query!("select * from Proposals where proposal_id = $1", id,)
+            .fetch_one(&mut conn)
+            .await?;
+        Ok(Proposal {
+            proposal_id: row.proposal_id,
+            user_id: row.user_id.into(),
+            job_id: row.job_id.into(),
+            proposal: row.proposal,
+        })
     }
 }
 
-#[derive(Debug, Builder, Clone)]
-#[builder(derive(Debug), build_fn(name = "build_from_index"))]
+#[derive(Debug, Clone)]
 pub struct Job {
-    #[builder(field(type = "i32"), setter(strip_option))]
     job_id: i32,
     title: String,
     website: String,
     description: String,
-    #[builder(setter(strip_option))]
     budget: BigDecimal,
-    #[builder(
-        setter(strip_option),
-        field(type = "Option<BigDecimal>", build = "self.hourly.clone()")
-    )]
     hourly: Option<BigDecimal>,
     post_url: String,
 }
 
 #[async_trait]
-impl FromDatabase<i32> for JobBuilder {
-    type OK = Job;
+impl FromDatabase<i32> for Job {
     type ERROR = anyhow::Error;
 
-    fn id(&self) -> i32 {
-        self.job_id
-    }
-    fn set_id(id: i32) -> Self {
-        Self::default().job_id(id).clone()
-    }
-    async fn build_from_index(&self, pool: Pool<Postgres>) -> Result<Job, anyhow::Error> {
+    async fn build_from_index(id: &i32, pool: Pool<Postgres>) -> Result<Job, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let row = sqlx::query_as!(
-            JobBuilder,
-            "select * from jobs where job_id = $1",
-            self.job_id,
-        )
-        .fetch_one(&mut conn)
-        .await?;
+        let row = sqlx::query!("select * from jobs where job_id = $1", id,)
+            .fetch_one(&mut conn)
+            .await?;
         // let user = UserBuilder::default()
         //     .user_id(row.user_id)
         //     .username(row.username)
@@ -145,19 +120,7 @@ struct Database {
 //     fn new(pool: Pool<Postgres>) -> Self {
 //         Database { pool: pool }
 //     }
-//     async fn add_user(&self, username: String, password: String) -> Result<User, anyhow::Error> {
-//         let mut conn = self.pool.acquire().await?;
-//         let record = sqlx::query!(
-//             r" INSERT INTO Users (username, password_digest) VALUES ($1,crypt($2, gen_salt('bf'))) RETURNING user_id",
-//             username,
-//             password,
-//         ).fetch_one(&mut conn).await?;
-//         Ok(User {
-//             username: username,
-//             user_id: record.user_id,
-//             password: (),
-//         })
-//     }
+
 //     async fn build_from_db(
 //         &self,
 //         username: String,

@@ -31,8 +31,8 @@ async fn main() -> Result<(), anyhow::Error> {
     //     .build_from_db(pool)
     //     .await?;
 
-    // println!("{:?}", user);
+    let user = User::add_user("shabram".into(), "123123".into(), pool).await?;
+    println!("{:?}", user);
 
-    let job = JobBuilder::default();
     Ok(())
 }
