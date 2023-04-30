@@ -12,6 +12,7 @@ async-trait = "0.1.68"
 serde = "1.0.160"
 sqlx = { version = "0.6.3", features = ["runtime-tokio-rustls", "postgres", "bigdecimal"] }
 tokio = { version = "1.27.0", features = ["macros"] }
+typed-builder = "0.14.0"
 
 [profile.release]
 strip = true  # Automatically strip symbols from the binary.

@@ -1,10 +1,14 @@
 #![allow(dead_code)]
 
+use std::{convert::Infallible, future::Pending};
+
 use crate::db::*;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use sqlx::{types::BigDecimal, Pool, Postgres};
 
+use crate::db::IndexItem::*;
+use serde::{Deserialize, Serialize};
+use sqlx::{types::BigDecimal, Pool, Postgres, Row};
+use typed_builder::TypedBuilder;
 #[derive(Debug, Clone)]
 pub struct User {
     user_id: i32,
@@ -50,16 +54,16 @@ impl FromDatabase for Proposal {
             .await?;
         Ok(Proposal {
             proposal_id: row.proposal_id,
-            user_id: IndexItem::<User>::Id(row.user_id),
-            job_id: IndexItem::<Job>::Id(row.job_id),
+            user_id: IndexItem::<User>::Index(row.user_id),
+            job_id: IndexItem::<Job>::Index(row.job_id),
             proposal: row.proposal,
         })
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Job<T = i32> {
-    job_id: T,
+#[derive(Debug, Clone, TypedBuilder, Default)]
+pub struct Job {
+    job_id: i32,
     title: String,
     website: String,
     description: String,
@@ -95,6 +99,33 @@ pub struct PendingJob {
     job_id: IndexItem<Job>,
     user_id: IndexItem<User>,
     proposal_id: IndexItem<Proposal>,
+}
+
+#[async_trait]
+impl FromDatabase for PendingJob {
+    type ERROR = anyhow::Error;
+    type Id = (IndexItem<User>, IndexItem<User>);
+
+    async fn build_from_index(
+        id: &Self::Id,
+        pool: Pool<Postgres>,
+    ) -> Result<PendingJob, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let row = sqlx::query!("SELECT job_id title FROM Jobs j WHERE j.job_id IN (SELECT DISTINCT job_id FROM PendingJobs)")
+            .fetch_one(&mut conn)
+            .await?;
+        todo!()
+    }
+}
+
+impl PendingJob {
+    async fn fetch_all(pool: Pool<Postgres>) -> Result<PendingJob, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let row = sqlx::query!("SELECT job_id title FROM Jobs j WHERE j.job_id IN (SELECT DISTINCT job_id FROM PendingJobs)")
+            .fetch_one(&mut conn)
+            .await?;
+        todo!()
+    }
 }
 struct Database {
     pool: Pool<Postgres>,
@@ -144,31 +175,33 @@ impl Database {
         Ok(verified_user)
     }
 
-    async fn add_job(&self) -> Result<Job, anyhow::Error> {
+    async fn add_job(
+        &self,
+        title: String,
+        website: String,
+        description: String,
+        budget: Option<BigDecimal>,
+        hourly: Option<BigDecimal>,
+        post_url: String,
+    ) -> Result<Job, anyhow::Error> {
         let mut conn: sqlx::pool::PoolConnection<Postgres> = self.pool.acquire().await?;
-        let record = sqlx::query!(
+
+        let record = sqlx::query_as!(
+            Job,
             r"INSERT INTO Jobs
         (title, website, description, budget, hourly, post_url)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING job_id",
-            job.title.clone(),
-            job.website.clone(),
-            job.description.clone(),
-            job.budget.clone(),
-            job.hourly.clone(),
-            job.post_url.clone()
+        VALUES ($1, $2, $3, $4, $5, $6) RETURNING job_id,title,website,description,budget, hourly, post_url",
+            title,
+            website,
+            description,
+            budget,
+            hourly,
+            post_url
         )
         .fetch_one(&mut conn)
         .await?;
 
-        Ok(Job {
-            job_id: record.job_id,
-            title: job.title,
-            website: job.website,
-            description: job.description,
-            budget: job.budget,
-            hourly: job.hourly,
-            post_url: job.post_url,
-        })
+        Ok(record)
     }
     async fn get_user_denied_jobs(
         &self,
@@ -176,19 +209,19 @@ impl Database {
     ) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
 
-        static query: &str = r#"
+        let rows = sqlx::query(
+            r#"
         SELECT j.*, p.*
         FROM Jobs j
         JOIN DecidedJobs d ON j.job_id = d.job_id
         JOIN Proposals p ON d.proposal_id = p.proposal_id
         JOIN Users u ON d.user_id = u.user_id
         WHERE u.username = $1 AND d.accepted = false;
-        "#;
-
-        let rows = sqlx::query(query)
-            .bind(username)
-            .fetch_all(&mut conn)
-            .await?;
+        "#,
+        )
+        .bind(username)
+        .fetch_all(&mut conn)
+        .await?;
 
         let denied_jobs = rows
             .into_iter()
@@ -205,8 +238,9 @@ impl Database {
                     },
                     Proposal {
                         proposal_id: row.get(7),
-                        user_id: row.get(8),
-                        job_id: row.get(9),
+                        user_id: Index(row.get(8)),
+                        job_id: Index(row.get(9)),
+                        proposal: row.get(10),
                     },
                 )
             })
@@ -214,4 +248,121 @@ impl Database {
 
         Ok(denied_jobs)
     }
+
+    async fn get_user_pending_jobs(
+        pool: &Pool<Postgres>,
+        username: &str,
+    ) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+
+        let query = "
+        SELECT j.*
+        FROM Jobs j
+        JOIN PendingJobs p ON j.job_id = p.job_id
+        JOIN Users u ON p.user_id = u.user_id
+        WHERE u.username = %s;
+        ";
+
+        let rows = sqlx::query(query)
+            .bind(username)
+            .fetch_all(&mut conn)
+            .await?;
+
+        let accepted_jobs = rows
+            .into_iter()
+            .map(|row| {
+                (
+                    Job {
+                        job_id: row.get(0),
+                        title: row.get(1),
+                        website: row.get(2),
+                        description: row.get(3),
+                        budget: row.get(4),
+                        hourly: row.get(5),
+                        post_url: row.get(6),
+                    },
+                    Proposal {
+                        proposal_id: row.get(7),
+                        user_id: Index(row.get(8)),
+                        job_id: Index(row.get(9)),
+                        proposal: row.get(10),
+                    },
+                )
+            })
+            .collect();
+
+        Ok(accepted_jobs)
+    }
+    async fn get_user_accepted_jobs(
+        pool: &Pool<Postgres>,
+        username: &str,
+    ) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+
+        let query = r#"
+        SELECT j.*, p.*
+        FROM Jobs j
+        JOIN DecidedJobs d ON j.job_id = d.job_id
+        JOIN Proposals p ON d.proposal_id = p.proposal_id
+        JOIN Users u ON d.user_id = u.user_id
+        WHERE u.username = $1 AND d.accepted = true;
+        "#;
+
+        let rows = sqlx::query(query)
+            .bind(username)
+            .fetch_all(&mut conn)
+            .await?;
+
+        let accepted_jobs = rows
+            .into_iter()
+            .map(|row| {
+                (
+                    Job {
+                        job_id: row.get(0),
+                        title: row.get(1),
+                        website: row.get(2),
+                        description: row.get(3),
+                        budget: row.get(4),
+                        hourly: row.get(5),
+                        post_url: row.get(6),
+                    },
+                    Proposal {
+                        proposal_id: row.get(7),
+                        user_id: Index(row.get(8)),
+                        job_id: Index(row.get(9)),
+                        proposal: row.get(10),
+                    },
+                )
+            })
+            .collect();
+
+        Ok(accepted_jobs)
+    }
 }
+
+async fn remove_pending_job(pool: &Pool<Postgres>, username: &str) -> Result<(), anyhow::Error> {
+    let mut conn = pool.acquire().await?;
+    let query = r#"
+    DELETE FROM PendingJobs
+    WHERE job_id = %s;
+    "#;
+
+    let rows = sqlx::query(query)
+        .bind(username)
+        .fetch_all(&mut conn)
+        .await?;
+
+    Ok(())
+}
+
+// async fn get_all_pending_jobs(pool: &Pool<Postgres>, username: &str) -> Result<Vec<(Box<Dyn)>, anyhow::Error> {
+//     let mut conn = pool.acquire().await?;
+//     let query = "SELECT job_id, title FROM Jobs j WHERE j.job_id IN (SELECT DISTINCT job_id FROM PendingJobs);"
+
+//     let rows = sqlx::query(query)
+//         .bind(username)
+//         .fetch_all(&mut conn)
+//         .await?;
+
+//     Ok(())
+// }

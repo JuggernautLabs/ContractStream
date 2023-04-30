@@ -15,8 +15,8 @@ pub trait FromDatabase: Sized {
 
 #[derive(Debug, Clone)]
 pub enum IndexItem<Struct: FromDatabase> {
-    Id(<Struct as FromDatabase>::Id),
-    Value(Struct),
+    Index(<Struct as FromDatabase>::Id),
+    Item(Struct),
 }
 
 impl<Struct: FromDatabase + Clone> IndexItem<Struct> {
@@ -25,13 +25,13 @@ impl<Struct: FromDatabase + Clone> IndexItem<Struct> {
         pool: sqlx::Pool<Postgres>,
     ) -> Result<IndexItem<Struct>, anyhow::Error> {
         let a: Result<IndexItem<Struct>, anyhow::Error> = match &self {
-            IndexItem::Id(id) => {
+            IndexItem::Index(id) => {
                 let k = Struct::build_from_index(id, pool)
                     .await
                     .map_err(|e| anyhow::anyhow!(e))?;
-                Ok(IndexItem::Value(k))
+                Ok(IndexItem::Item(k))
             }
-            IndexItem::Value(v) => Ok(IndexItem::Value(v.clone())),
+            IndexItem::Item(v) => Ok(IndexItem::Item(v.clone())),
         };
         a
     }
