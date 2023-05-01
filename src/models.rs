@@ -1,14 +1,11 @@
 #![allow(dead_code)]
 
-use std::{convert::Infallible, future::Pending};
-
 use crate::db::*;
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 
 use crate::db::Index;
-use serde::{Deserialize, Serialize};
-use sqlx::{types::BigDecimal, Pool, Postgres, Row};
+use sqlx::{types::BigDecimal, Pool, Postgres};
 use typed_builder::TypedBuilder;
 #[derive(Debug, Clone)]
 pub struct User {
