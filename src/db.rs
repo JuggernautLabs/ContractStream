@@ -1,8 +1,8 @@
-use std::{cell::RefCell, fmt::Debug, sync::Arc};
+use std::fmt::Debug;
 
 // use crate::models::*;
 use async_trait::async_trait;
-use sqlx::{pool, postgres::PgRow, Pool, Postgres};
+use sqlx::{Pool, Postgres};
 
 #[async_trait]
 pub trait FetchId: Sized {

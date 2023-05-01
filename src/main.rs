@@ -1,8 +1,8 @@
 mod db;
 mod models;
 
-use db::FetchId;
-use models::*;
+
+
 use sqlx::migrate::Migrator;
 use sqlx::postgres::PgPoolOptions;
 

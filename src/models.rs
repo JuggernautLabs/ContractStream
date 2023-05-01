@@ -155,7 +155,7 @@ impl FetchId for PendingJob {
         pool: Pool<Postgres>,
     ) -> Result<Vec<PendingJob>, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let records = sqlx::query!(
+        let _records = sqlx::query!(
             "SELECT * FROM PendingJobs WHERE job_id = $1 AND user_id = $2",
             id.job.id(),
             id.user.id(),
@@ -199,7 +199,7 @@ struct Database {
 
 impl Database {
     fn new(pool: Pool<Postgres>) -> Self {
-        Database { pool: pool }
+        Database { pool }
     }
 
     pub async fn add_user(
@@ -214,7 +214,7 @@ impl Database {
             password,
         ).fetch_one(&mut conn).await?;
         Ok(VerifiedUser(User {
-            username: username,
+            username,
             user_id: record.user_id,
             password_digest: (),
         }))
