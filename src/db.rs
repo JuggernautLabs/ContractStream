@@ -1,38 +1,33 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, fmt::Debug, sync::Arc};
 
 // use crate::models::*;
 use async_trait::async_trait;
 use sqlx::{pool, postgres::PgRow, Pool, Postgres};
 
 #[async_trait]
-pub trait FromDatabase: Sized {
+pub trait FetchId: Sized {
     type ERROR: Send + Sync + 'static + Into<anyhow::Error>;
     type Id: std::fmt::Debug + Clone;
-
-    async fn build_from_index(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self, Self::ERROR>;
-    // async fn save_to_db(&self, pool: Pool<Postgres>) -> Result<Self::OK, Self::ERROR>;
+    type Ok: Send + Sync + Debug + Clone;
+    async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self::Ok, Self::ERROR>;
 }
 
 #[derive(Debug, Clone)]
-pub enum IndexItem<Struct: FromDatabase> {
-    Index(<Struct as FromDatabase>::Id),
-    Item(Struct),
-}
-
-impl<Struct: FromDatabase + Clone> IndexItem<Struct> {
+pub struct Index<Struct: FetchId>(<Struct as FetchId>::Id);
+impl<Struct: FetchId + Clone> Index<Struct> {
+    pub fn new(id: <Struct as FetchId>::Id) -> Self {
+        Self(id)
+    }
     pub async fn fetch(
         &self,
         pool: sqlx::Pool<Postgres>,
-    ) -> Result<IndexItem<Struct>, anyhow::Error> {
-        let a: Result<IndexItem<Struct>, anyhow::Error> = match &self {
-            IndexItem::Index(id) => {
-                let k = Struct::build_from_index(id, pool)
-                    .await
-                    .map_err(|e| anyhow::anyhow!(e))?;
-                Ok(IndexItem::Item(k))
-            }
-            IndexItem::Item(v) => Ok(IndexItem::Item(v.clone())),
-        };
-        a
+    ) -> Result<<Struct as FetchId>::Ok, anyhow::Error> {
+        let k = Struct::fetch_id(&self.0, pool)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+        Ok(k)
+    }
+    pub fn id(&self) -> &<Struct as FetchId>::Id {
+        &self.0
     }
 }
