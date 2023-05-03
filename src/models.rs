@@ -1,20 +1,28 @@
 #![allow(dead_code)]
 
-use crate::db::*;
+use crate::db_utils::*;
 use anyhow::Context;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
-use crate::db::Index;
+use crate::db_utils::Index;
 use sqlx::{types::BigDecimal, Pool, Postgres};
 use typed_builder::TypedBuilder;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct User {
     user_id: i32,
     pub username: String,
     password_digest: (),
 }
 
-pub struct VerifiedUser(User);
+#[derive(Debug, Eq, PartialOrd, Ord)]
+pub struct VerifiedUser(pub(crate) User);
+
+impl PartialEq for VerifiedUser {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
 
 impl VerifiedUser {
     async fn add_proposal(
@@ -41,6 +49,49 @@ impl VerifiedUser {
             proposal: Some(proposal_text.into()),
         })
     }
+    async fn insert_career_info(
+        job_resume: String,
+        keywords: Vec<String>,
+        user_id: <User as FetchId>::Id,
+        job_id: <Job as FetchId>::Id,
+        pool: sqlx::Pool<Postgres>,
+    ) -> Result<(), anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let keyword_arr = keywords.as_slice();
+        sqlx::query!(
+            "INSERT INTO CareerInfo (job_resume, keywords, user_id, job_id)
+            VALUES ($1, $2, $3, $4)",
+            job_resume,
+            keyword_arr,
+            user_id,
+            job_id
+        )
+        .execute(&mut conn)
+        .await?;
+        Ok(())
+    }
+    async fn select_all_career_info(
+        pool: sqlx::Pool<Postgres>,
+    ) -> Result<Vec<CareerInfo>, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let career_info_rows =
+            sqlx::query!("SELECT info_id, job_resume, keywords, user_id, job_id FROM CareerInfo")
+                .fetch_all(&mut conn)
+                .await?;
+
+        let result = career_info_rows
+            .into_iter()
+            .map(|row| CareerInfo {
+                info_id: row.info_id,
+                job_resume: row.job_resume,
+                keywords: row.keywords,
+                user_id: Index::new(row.user_id),
+                job_id: Index::new(row.job_id),
+            })
+            .collect::<Vec<CareerInfo>>();
+
+        Ok(result)
+    }
 }
 #[async_trait]
 impl FetchId for User {
@@ -62,6 +113,14 @@ impl FetchId for User {
     }
 }
 
+#[derive(Debug)]
+struct CareerInfo {
+    info_id: i32,
+    job_resume: String,
+    keywords: Vec<String>,
+    user_id: Index<User>,
+    job_id: Index<Job>,
+}
 #[derive(Debug, Clone)]
 pub struct Proposal {
     proposal_id: i32,
@@ -89,7 +148,7 @@ impl FetchId for Proposal {
     }
 }
 
-#[derive(Debug, Clone, TypedBuilder, Default)]
+#[derive(Debug, Clone, TypedBuilder, Default, Serialize, Deserialize)]
 pub struct Job {
     job_id: i32,
     title: String,
@@ -133,11 +192,6 @@ pub struct DecidedJob {
     decided: Decided,
 }
 #[derive(Debug, Clone)]
-pub struct PendingJobId {
-    job: Index<Job>,
-    user: Index<User>,
-}
-#[derive(Debug, Clone)]
 pub struct PendingJob {
     job_id: Index<Job>,
     user_id: Index<User>,
@@ -147,7 +201,7 @@ pub struct PendingJob {
 #[async_trait]
 impl FetchId for PendingJob {
     type ERROR = anyhow::Error;
-    type Id = PendingJobId;
+    type Id = (<Job as FetchId>::Id, <User as FetchId>::Id);
     type Ok = Vec<Self>;
 
     async fn fetch_id(
@@ -157,8 +211,8 @@ impl FetchId for PendingJob {
         let mut conn = pool.acquire().await?;
         let _records = sqlx::query!(
             "SELECT * FROM PendingJobs WHERE job_id = $1 AND user_id = $2",
-            id.job.id(),
-            id.user.id(),
+            id.0,
+            id.1,
         )
         .fetch_all(&mut conn)
         .await?
@@ -193,12 +247,12 @@ impl FetchId for PendingJob {
 //     }
 // }
 
-struct Database {
+pub struct Database {
     pool: Pool<Postgres>,
 }
 
 impl Database {
-    fn new(pool: Pool<Postgres>) -> Self {
+    pub fn new(pool: Pool<Postgres>) -> Self {
         Database { pool }
     }
 
@@ -220,7 +274,7 @@ impl Database {
         }))
     }
 
-    async fn get_user(
+    pub async fn get_user(
         &self,
         username: String,
         password: String,
@@ -245,7 +299,7 @@ impl Database {
         Ok(VerifiedUser(verified_user))
     }
 
-    async fn add_job(
+    pub async fn add_job(
         &self,
         title: String,
         website: String,
@@ -274,7 +328,7 @@ impl Database {
         Ok(record)
     }
 
-    async fn get_user_denied_jobs(
+    pub async fn get_user_denied_jobs(
         &self,
         username: &str,
     ) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
@@ -320,7 +374,7 @@ impl Database {
         Ok(denied_jobs)
     }
 
-    async fn get_user_pending_jobs(&self, username: &str) -> Result<Vec<Job>, anyhow::Error> {
+    pub async fn get_user_pending_jobs(&self, username: String) -> Result<Vec<Job>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
 
         let rows = sqlx::query_as!(
@@ -339,7 +393,7 @@ impl Database {
 
         Ok(rows)
     }
-    async fn get_user_accepted_jobs(
+    pub async fn get_user_accepted_jobs(
         &self,
         username: &str,
     ) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
@@ -385,7 +439,10 @@ impl Database {
         Ok(accepted_jobs)
     }
 
-    async fn remove_pending_job(&self, job_id: <Job as FetchId>::Id) -> Result<(), anyhow::Error> {
+    pub async fn remove_pending_job(
+        &self,
+        job_id: <Job as FetchId>::Id,
+    ) -> Result<(), anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
 
         let _rows = sqlx::query!(
@@ -401,7 +458,7 @@ impl Database {
         Ok(())
     }
 
-    async fn get_user_decided_jobs(
+    pub async fn get_user_decided_jobs(
         &self,
         user_id: <User as FetchId>::Id,
     ) -> Result<Vec<DecidedJob>, anyhow::Error> {

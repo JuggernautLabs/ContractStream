@@ -14,6 +14,7 @@ pub trait FetchId: Sized {
 
 #[derive(Debug, Clone)]
 pub struct Index<Struct: FetchId>(<Struct as FetchId>::Id);
+
 impl<Struct: FetchId + Clone> Index<Struct> {
     pub fn new(id: <Struct as FetchId>::Id) -> Self {
         Self(id)
