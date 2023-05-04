@@ -1,6 +1,7 @@
 -- Add migration script here
  CREATE EXTENSION pgcrypto;
 
+
 CREATE TABLE IF NOT EXISTS Users (
     username VARCHAR(255) UNIQUE NOT NULL,
     user_id SERIAL PRIMARY KEY,
@@ -58,4 +59,5 @@ CREATE TABLE IF NOT EXISTS SearchContext (
     keywords varchar(255)[] default ARRAY[]::varchar[] NOT NULL,
     user_id INTEGER REFERENCES Users(user_id) NOT NULL
 );
+
 
