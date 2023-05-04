@@ -24,7 +24,10 @@ use sqlx::postgres::PgPoolOptions;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::models::{Database, VerifiedUser};
+use crate::{
+    db::{Database, Job, Resume, SearchContext, User, VerifiedUser},
+    db_utils::{FetchId, Index},
+};
 
 #[derive(PartialEq, PartialOrd, Eq, Ord)]
 struct LoginCookie {
@@ -51,12 +54,6 @@ impl<'a> Into<Cookie<'a>> for &LoginCookie {
     }
 }
 
-#[derive(Deserialize)]
-struct CareerInfo {
-    resume: String,
-    keywords: Vec<String>,
-}
-
 struct AppState {
     database: Database,
     login_cache: Mutex<BTreeMap<String, Arc<LoginCookie>>>,
@@ -67,7 +64,7 @@ impl AppState {
         let cookie = req.cookie("session_id").ok_or(AppError::InvalidSession)?;
         let session_id = cookie.value();
         let login_cache = self.login_cache.lock().unwrap();
-        let res = login_cache
+        let res: Result<Arc<LoginCookie>, AppError> = login_cache
             .get(session_id.into())
             .map(|inner| inner.clone())
             .ok_or(AppError::InvalidSession);
@@ -88,6 +85,8 @@ enum AppError {
     DatabaseError(#[from] anyhow::Error),
     #[error("invalid session")]
     InvalidSession,
+    #[error("input deserialization failed `{0}`")]
+    InvalidShape(String),
 }
 
 impl ResponseError for AppError {}
@@ -151,22 +150,31 @@ async fn pending_jobs(
     Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
 }
 
-#[post("/carrer_info")]
-async fn career_info(
+#[derive(Deserialize)]
+struct SearchContextReq {
+    resume: String,
+    keywords: Vec<String>,
+}
+#[post("/search_context")]
+async fn post_search_context(
     req: HttpRequest,
-    info: Json<CareerInfo>,
+    context: Json<SearchContextReq>,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
     let login_cookie = state.verify_user(req)?;
-    let database = &state.database;
-    let user = &login_cookie.user;
 
-    let pending_jobs = database
-        .get_user_pending_jobs(user.0.username.clone())
+    let user = &login_cookie.user;
+    let user_id = &user.0.user_id;
+
+    let context = context.into_inner();
+
+    let pool = &state.database.pool;
+    let _search_context = user
+        .insert_search_context(context.resume_id, context.keywords, pool)
         .await
         .map_err(|err| AppError::DatabaseError(err))?;
 
-    Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
+    Ok(HttpResponse::Ok())
 }
 
 pub async fn serve() -> Result<(), anyhow::Error> {
@@ -185,6 +193,7 @@ pub async fn serve() -> Result<(), anyhow::Error> {
             .service(login)
             .service(signup)
             .service(pending_jobs)
+            .service(post_search_context)
     })
     .bind(("127.0.0.1", 8080))?
     .run()

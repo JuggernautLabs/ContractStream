@@ -2,17 +2,18 @@ use std::fmt::Debug;
 
 // use crate::models::*;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Postgres};
 
 #[async_trait]
 pub trait FetchId: Sized {
     type ERROR: Send + Sync + 'static + Into<anyhow::Error>;
-    type Id: std::fmt::Debug + Clone;
+    type Id: std::fmt::Debug + Clone + Serialize + for<'de> Deserialize<'de>;
     type Ok: Send + Sync + Debug + Clone;
     async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self::Ok, Self::ERROR>;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Index<Struct: FetchId>(<Struct as FetchId>::Id);
 
 impl<Struct: FetchId + Clone> Index<Struct> {
@@ -28,7 +29,13 @@ impl<Struct: FetchId + Clone> Index<Struct> {
             .map_err(|e| anyhow::anyhow!(e))?;
         Ok(k)
     }
-    pub fn id(&self) -> &<Struct as FetchId>::Id {
-        &self.0
+    pub fn id(&self) -> <Struct as FetchId>::Id {
+        self.0.clone()
     }
+}
+
+#[async_trait]
+
+pub trait Save {
+    async fn save(&self, pool: &Pool<Postgres>) -> Result<(), anyhow::Error>;
 }
