@@ -1,7 +1,6 @@
 // logout
 // // request_cover_letter
 // input_cover_letter
-// input_relevant_info
 // pending_job_actions = (reject, proposal)
 // request_proposal(job_id)
 
@@ -143,7 +142,7 @@ async fn pending_jobs(
     let user = &login_cookie.user;
 
     let pending_jobs = database
-        .get_user_pending_jobs(user.0.username.clone())
+        .get_user_pending_jobs(user)
         .await
         .map_err(|err| AppError::DatabaseError(err))?;
 
@@ -155,6 +154,7 @@ struct SearchContextReq {
     resume_text: String,
     keywords: Vec<String>,
 }
+
 #[post("/search_context")]
 async fn post_search_context(
     req: HttpRequest,
@@ -164,30 +164,40 @@ async fn post_search_context(
     let login_cookie = state.verify_user(req)?;
 
     let user = &login_cookie.user;
-    let user_id = &user.0.user_id;
-
     let context = context.into_inner();
 
     let database = &state.database;
-    let pool = &state.database.pool;
-
     let resume = database.save_resume(user, context.resume_text).await?;
 
-    let _search_context = user
-        .insert_search_context(resume.resume_id, context.keywords, pool)
+    let _search_context = database
+        .insert_search_context(user, resume.resume_id, context.keywords)
         .await
         .map_err(|err| AppError::DatabaseError(err))?;
 
     Ok(HttpResponse::Ok())
 }
 
-pub async fn serve() -> Result<(), anyhow::Error> {
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect("postgres://shmendez@localhost/gptftw")
-        .await?;
+#[get("/active_searches")]
+async fn active_searches(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req)?;
+    let user = &login_cookie.user;
+
+    let database = &state.database;
+
+    let search_contexts = database
+        .get_search_contexts_by_user(user)
+        .await
+        .map_err(|err| AppError::DatabaseError(err))?;
+
+    Ok(HttpResponse::Ok().body(serde_json::to_string(&search_contexts).unwrap()))
+}
+
+pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
     let app_data = AppState {
-        database: Database::new(pool),
+        database: database,
         login_cache: Mutex::new(BTreeMap::new()),
     };
     let app_data = Arc::new(app_data);
@@ -198,6 +208,7 @@ pub async fn serve() -> Result<(), anyhow::Error> {
             .service(signup)
             .service(pending_jobs)
             .service(post_search_context)
+            .service(active_searches)
     })
     .bind(("127.0.0.1", 8080))?
     .run()
