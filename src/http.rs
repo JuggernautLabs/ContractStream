@@ -20,7 +20,7 @@ use actix_web::{
 };
 use anyhow::anyhow;
 use serde::Deserialize;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::{database, postgres::PgPoolOptions};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -152,7 +152,7 @@ async fn pending_jobs(
 
 #[derive(Deserialize)]
 struct SearchContextReq {
-    resume: String,
+    resume_text: String,
     keywords: Vec<String>,
 }
 #[post("/search_context")]
@@ -168,9 +168,13 @@ async fn post_search_context(
 
     let context = context.into_inner();
 
+    let database = &state.database;
     let pool = &state.database.pool;
+
+    let resume = database.save_resume(user, context.resume_text).await?;
+
     let _search_context = user
-        .insert_search_context(context.resume_id, context.keywords, pool)
+        .insert_search_context(resume.resume_id, context.keywords, pool)
         .await
         .map_err(|err| AppError::DatabaseError(err))?;
 

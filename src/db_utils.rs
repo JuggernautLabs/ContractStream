@@ -33,9 +33,3 @@ impl<Struct: FetchId + Clone> Index<Struct> {
         self.0.clone()
     }
 }
-
-#[async_trait]
-
-pub trait Save {
-    async fn save(&self, pool: &Pool<Postgres>) -> Result<(), anyhow::Error>;
-}
