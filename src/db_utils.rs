@@ -7,12 +7,12 @@ use sqlx::{Pool, Postgres};
 
 #[async_trait]
 pub trait FetchId: Sized {
-    type ERROR: Send + Sync + 'static + Into<anyhow::Error>;
     type Id: std::fmt::Debug + Clone + Serialize + for<'de> Deserialize<'de>;
     type Ok: Send + Sync + Debug + Clone;
-    async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self::Ok, Self::ERROR>;
+    async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self::Ok, anyhow::Error>;
 }
 
+pub type Id<T> = <T as FetchId>::Id;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Index<Struct: FetchId>(<Struct as FetchId>::Id);
 

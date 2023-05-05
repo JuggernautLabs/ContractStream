@@ -16,14 +16,11 @@ help_message() {
     echo
 }
 
-
-
 # Check for flags
 if [ $# -eq 0 ]; then
     help_message
     exit 1
 fi
-
 
 # Check if sqlx-cli is installed, and install it if not
 if ! command -v sqlx > /dev/null; then
@@ -35,7 +32,20 @@ fi
 
 echo 
 
+ENV=".env" 
+for arg in "$@"
+do
+    case $arg in
+        --env)
+            ENV=$1
+            break
+            ;;
+        
 
+    esac
+done
+
+export $(cat $ENV | xargs)
 for arg in "$@"
 do
     case $arg in
