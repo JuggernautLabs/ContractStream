@@ -6,27 +6,25 @@
 
 use std::{
     collections::BTreeMap,
-    future::pending,
     sync::{Arc, Mutex},
     time::Instant,
 };
 
 use actix_web::{
     cookie::{time::Duration, Cookie},
-    get, post,
+    get,
+    middleware::Logger,
+    post,
     web::{self, Data, Form, Json},
     App, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError,
 };
-use anyhow::anyhow;
+use env_logger::Env;
 use serde::Deserialize;
-use sqlx::{database, postgres::PgPoolOptions};
+
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
-    db::{Database, Job, Resume, SearchContext, User, VerifiedUser},
-    db_utils::{FetchId, Index},
-};
+use crate::db::{Database, VerifiedUser};
 
 #[derive(PartialEq, PartialOrd, Eq, Ord)]
 struct LoginCookie {
@@ -64,8 +62,8 @@ impl AppState {
         let session_id = cookie.value();
         let login_cache = self.login_cache.lock().unwrap();
         let res: Result<Arc<LoginCookie>, AppError> = login_cache
-            .get(session_id.into())
-            .map(|inner| inner.clone())
+            .get(session_id)
+            .cloned()
             .ok_or(AppError::InvalidSession);
 
         res
@@ -97,7 +95,7 @@ struct LoginForm {
 }
 #[post("/login")]
 async fn login(
-    req: HttpRequest,
+    _req: HttpRequest,
     login_form: Form<LoginForm>,
     data: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
@@ -105,9 +103,9 @@ async fn login(
         .database
         .get_user(login_form.username.clone(), login_form.password.clone())
         .await
-        .map_err(|err| AppError::LoginError(err))?;
+        .map_err(AppError::LoginError)?;
     let session_cookie = LoginCookie::new(user, Duration::hours(1));
-    let mut res = HttpResponse::Ok().body(format!("login successful"));
+    let mut res = HttpResponse::Ok().body("login successful".to_string());
 
     res.add_cookie(&(&session_cookie).into()).unwrap();
 
@@ -128,7 +126,7 @@ async fn signup(
         .database
         .add_user(login_form.username.clone(), login_form.password.clone())
         .await
-        .map_err(|err| AppError::SignupError(err))?;
+        .map_err(AppError::SignupError)?;
     Ok(HttpResponse::Ok().body(format!("{:?}", user)))
 }
 
@@ -144,7 +142,7 @@ async fn pending_jobs(
     let pending_jobs = database
         .get_user_pending_jobs(user)
         .await
-        .map_err(|err| AppError::DatabaseError(err))?;
+        .map_err(AppError::DatabaseError)?;
 
     Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
 }
@@ -172,7 +170,7 @@ async fn post_search_context(
     let _search_context = database
         .insert_search_context(user, resume.resume_id, context.keywords)
         .await
-        .map_err(|err| AppError::DatabaseError(err))?;
+        .map_err(AppError::DatabaseError)?;
 
     Ok(HttpResponse::Ok())
 }
@@ -190,25 +188,32 @@ async fn active_searches(
     let search_contexts = database
         .get_search_contexts_by_user(user)
         .await
-        .map_err(|err| AppError::DatabaseError(err))?;
+        .map_err(AppError::DatabaseError)?;
 
     Ok(HttpResponse::Ok().body(serde_json::to_string(&search_contexts).unwrap()))
 }
 
 pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
     let app_data = AppState {
-        database: database,
+        database,
         login_cache: Mutex::new(BTreeMap::new()),
     };
     let app_data = Arc::new(app_data);
+
+    std::env::set_var("RUST_LOG", "actix_web=info");
+    env_logger::init();
+
     HttpServer::new(move || {
-        App::new()
+        let app = App::new()
+            .wrap(Logger::default())
+            .wrap(Logger::new("%a %{User-Agent}i"))
             .app_data(web::Data::new(app_data.clone()))
             .service(login)
             .service(signup)
             .service(pending_jobs)
             .service(post_search_context)
-            .service(active_searches)
+            .service(active_searches);
+        app
     })
     .bind(("127.0.0.1", 8080))?
     .run()

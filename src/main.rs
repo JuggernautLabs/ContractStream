@@ -3,7 +3,7 @@ mod db_utils;
 mod http;
 
 use dotenv::dotenv;
-use sqlx::migrate::Migrator;
+
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 
@@ -19,7 +19,7 @@ use crate::db::Database;
 async fn main() -> Result<(), anyhow::Error> {
     dotenv().ok();
     let database_url =
-        env::var("DATABASE_URL").map_err(|err| anyhow::anyhow!("Please specify database url"))?;
+        env::var("DATABASE_URL").map_err(|_err| anyhow::anyhow!("Please specify database url"))?;
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .connect(&database_url)

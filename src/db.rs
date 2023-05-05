@@ -1,11 +1,9 @@
 #![allow(dead_code)]
 
-use std::fmt::Error;
-
 use crate::db_utils::*;
 use anyhow::Context;
 use async_trait::async_trait;
-use derive_builder::Builder;
+
 use serde::{Deserialize, Serialize};
 
 use crate::db_utils::Index;
@@ -59,7 +57,7 @@ impl FetchId for Resume {
     type Ok = Self;
     async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self::Ok, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let row = sqlx::query!("select * from Resumes where resume_id = $1", id)
+        let _row = sqlx::query!("select * from Resumes where resume_id = $1", id)
             .fetch_one(&mut conn)
             .await?;
         todo!()
@@ -469,7 +467,7 @@ impl Database {
         .resume_id;
 
         Ok(Resume {
-            resume_id: resume_id,
+            resume_id,
             user_id: Index::new(user.0.user_id),
             resume_text,
         })
@@ -481,7 +479,7 @@ impl Database {
         resume_id: Id<Resume>,
     ) -> Result<(), anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
-        let resume_id = sqlx::query!(
+        let _resume_id = sqlx::query!(
             "UPDATE Resumes
             SET deleted = true
             WHERE user_id = $1
