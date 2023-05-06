@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS Jobs (
     description TEXT NOT NULL,
     budget NUMERIC NULL,
     hourly NUMERIC NULL,
-    post_url VARCHAR(255) NOT NULL
+    post_url VARCHAR(255) NOT NULL,
+    summary VARCHAR(255),
 );
 
 CREATE TABLE IF NOT EXISTS Proposals (
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS Resumes (
 
 );
 
-CREATE TABLE IF NOT EXISTS SearchContext (
+CREATE TABLE IF NOT EXISTS SearchContexts (
     context_id SERIAL PRIMARY KEY,
     resume_id INTEGER REFERENCES Resumes(resume_id) NOT NULL,
     keywords varchar(255)[] default ARRAY[]::varchar[] NOT NULL,

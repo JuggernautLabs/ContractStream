@@ -40,7 +40,12 @@ do
             ENV=$1
             break
             ;;
-        
+        --clean)
+            sqlx database drop -y
+            sqlx database create
+
+            shift
+            ;;
 
     esac
 done
@@ -53,11 +58,7 @@ do
             help_message
             exit 0
             ;;
-        --clean)
-            sqlx database drop -y
-            sqlx database create
-            shift
-            ;;
+
         --create)
             sqlx database create
             shift

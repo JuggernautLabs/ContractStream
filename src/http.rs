@@ -12,7 +12,7 @@ use std::{
 
 use actix_web::{
     cookie::{time::Duration, Cookie},
-    get,
+    delete, get,
     middleware::Logger,
     post,
     web::{self, Data, Form, Json},
@@ -146,7 +146,6 @@ async fn pending_jobs(
 
     Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
 }
-
 #[derive(Deserialize)]
 struct SearchContextReq {
     resume_text: String,
@@ -155,6 +154,47 @@ struct SearchContextReq {
 
 #[post("/search_context")]
 async fn post_search_context(
+    req: HttpRequest,
+    context: Json<SearchContextReq>,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req)?;
+
+    let user = &login_cookie.user;
+    let context = context.into_inner();
+
+    let database = &state.database;
+    let resume = database.save_resume(user, context.resume_text).await?;
+
+    let _search_context = database
+        .insert_search_context(user, resume.resume_id, context.keywords)
+        .await
+        .map_err(AppError::DatabaseError)?;
+
+    Ok(HttpResponse::Ok())
+}
+
+#[get("/search_context")]
+async fn get_search_context(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req)?;
+
+    let user = &login_cookie.user;
+
+    let database = &state.database;
+
+    let _search_context = database
+        .remove_search_context(user)
+        .await
+        .map_err(AppError::DatabaseError)?;
+
+    Ok(HttpResponse::Ok())
+}
+
+#[delete("/search_context")]
+async fn delete_search_context(
     req: HttpRequest,
     context: Json<SearchContextReq>,
     state: Data<Arc<AppState>>,

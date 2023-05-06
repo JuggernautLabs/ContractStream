@@ -19,6 +19,11 @@ pub struct User {
 #[derive(Debug, Eq, PartialOrd, Ord)]
 pub struct VerifiedUser(User);
 
+impl VerifiedUser {
+    fn id(&self) -> Id<User> {
+        return self.id();
+    }
+}
 impl PartialEq for VerifiedUser {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
@@ -57,19 +62,43 @@ impl FetchId for Resume {
     type Ok = Self;
     async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self::Ok, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let _row = sqlx::query!("select * from Resumes where resume_id = $1", id)
-            .fetch_one(&mut conn)
-            .await?;
+        let _row = sqlx::query!(
+            "select * from Resumes where resume_id = $1 and not deleted",
+            id
+        )
+        .fetch_one(&mut conn)
+        .await?;
         todo!()
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SearchContext {
     pub context_id: i32,
     pub resume_id: Index<Resume>,
     pub keywords: Vec<String>,
     pub user_id: Index<User>,
+}
+
+#[async_trait]
+impl FetchId for SearchContext {
+    type Id = i32;
+    type Ok = Self;
+    async fn fetch_id(id: &i32, pool: Pool<Postgres>) -> Result<SearchContext, anyhow::Error> {
+        let mut conn = pool.acquire().await?;
+        let row = sqlx::query!(
+            "select * from SearchContexts where context_id = $1 and not deleted",
+            id,
+        )
+        .fetch_one(&mut conn)
+        .await?;
+        Ok(SearchContext {
+            context_id: row.context_id,
+            resume_id: Index::<Resume>::new(row.resume_id),
+            keywords: row.keywords,
+            user_id: Index::<User>::new(row.user_id),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -459,7 +488,7 @@ impl Database {
             VALUES ($1, $2)
             RETURNING resume_id
             ",
-            user.0.user_id,
+            user.id(),
             resume_text
         )
         .fetch_one(&mut conn)
@@ -468,7 +497,7 @@ impl Database {
 
         Ok(Resume {
             resume_id,
-            user_id: Index::new(user.0.user_id),
+            user_id: Index::new(user.id()),
             resume_text,
         })
     }
@@ -484,7 +513,7 @@ impl Database {
             SET deleted = true
             WHERE user_id = $1
             AND resume_id = $2",
-            user.0.user_id,
+            user.id(),
             resume_id,
         )
         .fetch_one(&mut conn)
@@ -505,14 +534,14 @@ impl Database {
             "INSERT INTO Proposals (user_id, job_id, proposal)
         VALUES ($1, $2, $3)
         RETURNING proposal_id",
-            user.0.user_id,
+            user.id(),
             job_id,
             proposal_text
         )
         .fetch_one(&mut conn)
         .await?;
         Ok(Proposal {
-            user_id: Index::new(user.0.user_id),
+            user_id: Index::new(user.id()),
             job_id: Index::new(job_id),
             proposal_id: row.proposal_id,
             proposal: Some(proposal_text.into()),
@@ -527,9 +556,9 @@ impl Database {
         let mut conn = self.pool.acquire().await?;
         let keyword_arr = keywords.as_slice();
 
-        let user_id = user.0.user_id;
+        let user_id = user.id();
         let record = sqlx::query!(
-            "INSERT INTO SearchContext (resume_id, keywords, user_id)
+            "INSERT INTO SearchContexts (resume_id, keywords, user_id)
             VALUES ($1, $2, $3)
             RETURNING context_id",
             resume_id,
@@ -546,15 +575,36 @@ impl Database {
             user_id: Index::new(resume_id),
         })
     }
+    pub async fn remove_search_context(
+        &self,
+        user: &VerifiedUser,
+        context_id: Id<SearchContext>,
+    ) -> Result<(), anyhow::Error> {
+        let mut conn = self.pool.acquire().await?;
 
+        let user_id = user.id();
+        let record = sqlx::query!(
+            "UPDATE SearchContexts
+            SET deleted = true
+            WHERE context_id = $1
+            AND user_id = $2
+            ",
+            context_id,
+            user_id,
+        )
+        .fetch_one(&mut conn)
+        .await?;
+
+        Ok(())
+    }
     pub async fn get_search_contexts_by_user(
         &self,
         user_id: &VerifiedUser,
     ) -> Result<Vec<SearchContext>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
         let career_info_rows = sqlx::query!(
-            "SELECT context_id, resume_id, user_id, keywords FROM SearchContext WHERE user_id = $1",
-            user_id.0.user_id
+            "SELECT context_id, resume_id, user_id, keywords FROM SearchContexts WHERE user_id = $1",
+            user_id.id()
         )
         .fetch_all(&mut conn)
         .await?;
