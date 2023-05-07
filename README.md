@@ -82,4 +82,4 @@ Copyright (c) 2023
 - [Sqlx](https://github.com/launchbadge/sqlx) - A Sql library boasting compile-time query validation
 - [Serde](https://serde.rs/) - A framework for serializing and deserializing Rust data structures efficiently and generically.
 - [UUID](https://github.com/uuid-rs/uuid) - A library providing support for Universally Unique Identifiers (UUIDs) in Rust.
-- [Thiserror](https://github.com/dtolnay/thiserror) - A library for creating custom error types in Rust.
+- [Thiserror](https://github.com/dtolnay/thiserror) - A library for creating custom error types in Rust.    

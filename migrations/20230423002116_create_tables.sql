@@ -17,8 +17,8 @@ CREATE TABLE IF NOT EXISTS Jobs (
     description TEXT NOT NULL,
     budget NUMERIC NULL,
     hourly NUMERIC NULL,
-    post_url VARCHAR(255) NOT NULL,
-    summary VARCHAR(255),
+    post_url VARCHAR(255) NOT NULL UNIQUE,
+    summary VARCHAR(255)
 );
 
 CREATE TABLE IF NOT EXISTS Proposals (
@@ -28,13 +28,6 @@ CREATE TABLE IF NOT EXISTS Proposals (
     proposal TEXT
 );
 
-CREATE TABLE IF NOT EXISTS DecidedJobs (
-    user_id INTEGER REFERENCES Users(user_id),
-    job_id INTEGER REFERENCES Jobs(job_id),
-    proposal_id INTEGER REFERENCES Proposals(proposal_id),
-    accepted BOOLEAN,
-    PRIMARY KEY (user_id, job_id)
-);
 
 CREATE TABLE IF NOT EXISTS PendingJobs (
     user_id INTEGER REFERENCES Users(user_id),
@@ -42,6 +35,11 @@ CREATE TABLE IF NOT EXISTS PendingJobs (
     proposal_id INTEGER REFERENCES Proposals(proposal_id),
     PRIMARY KEY (user_id, job_id)
 );
+
+CREATE TABLE IF NOT EXISTS DecidedJobs (
+    accepted BOOLEAN NOT NULL,
+    PRIMARY KEY (user_id, job_id)
+)   INHERITS(PendingJobs);
 
 CREATE TABLE IF NOT EXISTS KMeansClasses (
     user_id INTEGER REFERENCES Users(user_id),

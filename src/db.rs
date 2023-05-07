@@ -9,14 +9,14 @@ use serde::{Deserialize, Serialize};
 use crate::db_utils::Index;
 use sqlx::{types::BigDecimal, Pool, Postgres};
 use typed_builder::TypedBuilder;
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct User {
     pub user_id: i32,
     pub username: String,
     password_digest: (),
 }
 
-#[derive(Debug, Eq, PartialOrd, Ord)]
+#[derive(Debug)]
 pub struct VerifiedUser(User);
 
 impl VerifiedUser {
@@ -136,6 +136,7 @@ pub struct Job {
     budget: Option<BigDecimal>,
     hourly: Option<BigDecimal>,
     post_url: String,
+    summary: Option<String>,
 }
 
 #[async_trait]
@@ -155,6 +156,7 @@ impl FetchId for Job {
             budget: row.budget,
             hourly: row.hourly,
             post_url: row.post_url,
+            summary: row.summary,
         })
     }
 }
@@ -284,27 +286,69 @@ impl Database {
         budget: Option<BigDecimal>,
         hourly: Option<BigDecimal>,
         post_url: String,
+        summary: Option<String>,
     ) -> Result<Job, anyhow::Error> {
         let mut conn: sqlx::pool::PoolConnection<Postgres> = self.pool.acquire().await?;
 
         let record = sqlx::query_as!(
             Job,
             r"INSERT INTO Jobs
-        (title, website, description, budget, hourly, post_url)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING job_id,title,website,description,budget, hourly, post_url",
+        (title, website, description, budget, hourly, post_url, summary)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING job_id,title,website,description,budget, hourly, post_url, summary",
             title,
             website,
             description,
             budget,
             hourly,
-            post_url
+            post_url,
+            summary,
         )
         .fetch_one(&mut conn)
         .await?;
 
         Ok(record)
     }
+    pub async fn add_job_if_not_exists(
+        &self,
+        title: String,
+        website: String,
+        description: String,
+        budget: Option<BigDecimal>,
+        hourly: Option<BigDecimal>,
+        post_url: String,
+        summary: Option<String>,
+    ) -> Result<Index<Job>, anyhow::Error> {
+        let mut conn: sqlx::pool::PoolConnection<Postgres> = self.pool.acquire().await?;
 
+        let record = sqlx::query!(
+            r"WITH new_job AS (
+                INSERT INTO Jobs (title, website, description, budget, hourly, post_url, summary)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (post_url) DO NOTHING
+                RETURNING job_id
+            )
+            SELECT job_id
+            FROM new_job
+            UNION ALL
+            SELECT job_id
+            FROM Jobs
+            WHERE post_url = $6
+            LIMIT 1;",
+            title,
+            website,
+            description,
+            budget,
+            hourly,
+            post_url,
+            summary,
+        )
+        .fetch_one(&mut conn)
+        .await?;
+
+        Ok(Index::new(
+            record.job_id.context("job_id not returned, fatal error")?,
+        ))
+    }
     pub async fn get_user_denied_jobs(
         &self,
         username: &str,
@@ -337,6 +381,7 @@ impl Database {
                         budget: row.budget,
                         hourly: row.hourly,
                         post_url: row.post_url,
+                        summary: row.summary,
                     },
                     Proposal {
                         proposal_id: row.proposal_id,
@@ -405,6 +450,7 @@ impl Database {
                         budget: row.budget,
                         hourly: row.hourly,
                         post_url: row.post_url,
+                        summary: row.summary,
                     },
                     Proposal {
                         proposal_id: row.proposal_id,

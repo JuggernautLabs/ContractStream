@@ -15,6 +15,7 @@ use actix_web::{
     delete, get,
     middleware::Logger,
     post,
+    web::Path,
     web::{self, Data, Form, Json},
     App, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError,
 };
@@ -26,7 +27,7 @@ use uuid::Uuid;
 
 use crate::db::{Database, VerifiedUser};
 
-#[derive(PartialEq, PartialOrd, Eq, Ord)]
+#[derive(PartialEq)]
 struct LoginCookie {
     cookie_id: Uuid,
     death_date: Instant,
@@ -185,30 +186,28 @@ async fn get_search_context(
 
     let database = &state.database;
 
-    let _search_context = database
-        .remove_search_context(user)
+    let search_contexts = database
+        .get_search_contexts_by_user(user)
         .await
         .map_err(AppError::DatabaseError)?;
 
-    Ok(HttpResponse::Ok())
+    Ok(HttpResponse::Ok().body(serde_json::to_string(&search_contexts).unwrap()))
 }
 
-#[delete("/search_context")]
+#[delete("/search_context/{context_id}")]
 async fn delete_search_context(
     req: HttpRequest,
-    context: Json<SearchContextReq>,
+    context_id: Path<i32>,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
     let login_cookie = state.verify_user(req)?;
 
     let user = &login_cookie.user;
-    let context = context.into_inner();
 
     let database = &state.database;
-    let resume = database.save_resume(user, context.resume_text).await?;
 
     let _search_context = database
-        .insert_search_context(user, resume.resume_id, context.keywords)
+        .remove_search_context(user, context_id.into_inner())
         .await
         .map_err(AppError::DatabaseError)?;
 
