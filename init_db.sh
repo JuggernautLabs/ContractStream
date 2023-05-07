@@ -43,7 +43,11 @@ do
         --clean)
             sqlx database drop -y
             sqlx database create
-
+            shift
+            ;;
+            
+        --create)
+            sqlx database create
             shift
             ;;
 
