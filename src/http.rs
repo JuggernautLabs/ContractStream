@@ -232,6 +232,23 @@ async fn active_searches(
     Ok(HttpResponse::Ok().body(serde_json::to_string(&search_contexts).unwrap()))
 }
 
+// #[get("/filtered_jobs")]
+// async fn filtered_jobs(
+//     req: HttpRequest,
+//     state: Data<Arc<AppState>>,
+// ) -> Result<impl Responder, AppError> {
+//     let login_cookie = state.verify_user(req)?;
+//     let user = &login_cookie.user;
+
+//     let database = &state.database;
+
+//     todo!()
+
+//     // Ok(HttpResponse::Ok().body(serde_json::to_string(&search_contexts).unwrap()))
+// }
+
+// #[get("create_search")]
+
 pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
     let app_data = AppState {
         database,
@@ -251,7 +268,8 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(signup)
             .service(pending_jobs)
             .service(post_search_context)
-            .service(active_searches);
+            .service(active_searches)
+            .service(delete_search_context);
         app
     })
     .bind(("127.0.0.1", 8080))?

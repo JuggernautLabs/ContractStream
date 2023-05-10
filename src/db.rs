@@ -5,10 +5,14 @@ use anyhow::Context;
 use async_trait::async_trait;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::db_utils::Index;
 use sqlx::{types::BigDecimal, Pool, Postgres};
 use typed_builder::TypedBuilder;
+
+#[derive(TS)]
+#[ts(export)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct User {
     pub user_id: i32,
@@ -16,7 +20,12 @@ pub struct User {
     password_digest: (),
 }
 
+// doesn't implement Clone on purpose,
+// with Clone many instances of a single verified user can exist
+// haven't thought through if this makes type-safe verification weaker
 #[derive(Debug)]
+/// Represents a user that has logged in
+/// Handling such a user should be done with care
 pub struct VerifiedUser(User);
 
 impl VerifiedUser {
@@ -49,7 +58,9 @@ impl FetchId for User {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+
 pub struct Resume {
     pub resume_id: i32,
     pub user_id: Index<User>,
@@ -72,10 +83,11 @@ impl FetchId for Resume {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, TS)]
+#[ts(export)]
 pub struct SearchContext {
     pub context_id: i32,
-    pub resume_id: Index<Resume>,
+    pub resume_id: Option<Index<Resume>>,
     pub keywords: Vec<String>,
     pub user_id: Index<User>,
 }
@@ -94,14 +106,15 @@ impl FetchId for SearchContext {
         .await?;
         Ok(SearchContext {
             context_id: row.context_id,
-            resume_id: Index::<Resume>::new(row.resume_id),
+            resume_id: row.resume_id.map(|rid| Index::<Resume>::new(rid)),
             keywords: row.keywords,
             user_id: Index::<User>::new(row.user_id),
         })
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, TS)]
+#[ts(export)]
 pub struct Proposal {
     proposal_id: i32,
     user_id: Index<User>,
@@ -127,7 +140,8 @@ impl FetchId for Proposal {
     }
 }
 
-#[derive(Debug, Clone, TypedBuilder, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, TypedBuilder, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Job {
     job_id: i32,
     title: String,
@@ -161,17 +175,20 @@ impl FetchId for Job {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, TS)]
+#[ts(export)]
 enum Decided {
     Accepted,
     Denied,
 }
-#[derive(Debug)]
+#[derive(Debug, TS)]
+#[ts(export)]
 pub struct DecidedJob {
     job_id: Index<Job>,
     decided: Decided,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, TS)]
+#[ts(export)]
 pub struct PendingJob {
     job_id: Index<Job>,
     user_id: Index<User>,
@@ -616,7 +633,7 @@ impl Database {
 
         Ok(SearchContext {
             context_id: record.context_id,
-            resume_id: Index::new(resume_id),
+            resume_id: Some(Index::new(resume_id)),
             keywords,
             user_id: Index::new(resume_id),
         })
@@ -657,11 +674,14 @@ impl Database {
 
         let result = career_info_rows
             .into_iter()
-            .map(|row| SearchContext {
-                context_id: row.context_id,
-                resume_id: Index::new(row.resume_id),
-                keywords: row.keywords,
-                user_id: Index::new(row.user_id),
+            .map(|row| {
+                let resume_id = row.resume_id.map(|id| Index::<Resume>::new(id));
+                SearchContext {
+                    context_id: row.context_id,
+                    resume_id,
+                    keywords: row.keywords,
+                    user_id: Index::new(row.user_id),
+                }
             })
             .collect::<Vec<SearchContext>>();
 

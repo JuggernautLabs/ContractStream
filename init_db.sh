@@ -1,5 +1,5 @@
-#!/bin/bash
-echo 
+#!/usr/bin/env bash
+
 help_message() {
     echo
     echo "Usage: $0 [OPTIONS]"
@@ -16,73 +16,98 @@ help_message() {
     echo
 }
 
-# Check for flags
+FLAGS=(
+    "--clean"
+    "--create"
+    "--prod"
+    "--dev"
+)
+
+FUNCTIONS=(
+    "clean_database"
+    "create_database"
+    "migrate_prod"
+    "migrate_dev"
+)
+
+clean_database() {
+    sqlx database drop -y
+    sqlx database create
+}
+
+create_database() {
+    sqlx database create
+}
+
+migrate_prod() {
+    sqlx migrate run
+}
+
+migrate_dev() {
+    echo "CAUTION: creating development database..."
+    sqlx migrate run --ignore-missing
+    sqlx migrate run --ignore-missing --source migrations/test_migrations
+}
+
+check_sqlx() {
+    if ! command -v sqlx > /dev/null; then
+        echo "sqlx-cli not found. Installing..."
+        cargo install sqlx-cli
+    else
+        echo "sqlx-cli is already installed."
+    fi
+}
+
 if [ $# -eq 0 ]; then
     help_message
     exit 1
 fi
 
-# Check if sqlx-cli is installed, and install it if not
-if ! command -v sqlx > /dev/null; then
-    echo "sqlx-cli not found. Installing..."
-    cargo install sqlx-cli
-else
-    echo "sqlx-cli is already installed."
-fi
+ENV=".env"
+args=("$@")
 
-echo 
-
-ENV=".env" 
-for arg in "$@"
-do
-    case $arg in
-        --env)
-            ENV=$1
-            break
-            ;;
-        --clean)
-            sqlx database drop -y
-            sqlx database create
-            shift
-            ;;
-            
-        --create)
-            sqlx database create
-            shift
-            ;;
-
-    esac
+STATUS=()
+for _ in "${FLAGS[@]}"; do
+    STATUS+=(false)
 done
 
-export $(cat $ENV | xargs)
-for arg in "$@"
-do
-    case $arg in
+while (( "$#" )); do
+    case $1 in
+        --env)
+            ENV="$2"
+            shift 2
+            ;;
         --help)
             help_message
             exit 0
             ;;
-
-        --create)
-            sqlx database create
-            shift
-            ;;
-        --prod)
-            sqlx migrate run
-            shift
-            ;;
-        --dev)
-            echo "CAUTION: creating development database..."
-            sqlx migrate run --ignore-missing
-            sqlx migrate run --ignore-missing --source migrations/test_migrations
-            shift
-            ;;
         *)
-            echo "Unknown option: $arg"
-            help_message
-            exit 1
+            found=false
+            for i in "${!FLAGS[@]}"; do
+                if [ "$1" = "${FLAGS[$i]}" ]; then
+                    STATUS[$i]=true
+                    found=true
+                    shift
+                    break
+                fi
+            done
+            if [ "$found" = false ]; then
+                echo "Unknown option: $1"
+                help_message
+                exit 1
+            fi
             ;;
     esac
+done
+
+check_sqlx
+
+export $(grep -v '^#' "$ENV" | xargs)
+
+for i in "${!STATUS[@]}"; do
+    if [ "${STATUS[$i]}" = true ]; then
+        ${FUNCTIONS[$i]}
+    fi
 done
 
 echo
