@@ -42,7 +42,6 @@ impl PartialEq for VerifiedUser {
 #[async_trait]
 impl FetchId for User {
     type Id = i32;
-    type Ok = Self;
 
     async fn fetch_id(id: &i32, pool: Pool<Postgres>) -> Result<User, anyhow::Error> {
         let mut conn = pool.acquire().await?;
@@ -70,16 +69,20 @@ pub struct Resume {
 #[async_trait]
 impl FetchId for Resume {
     type Id = i32;
-    type Ok = Self;
-    async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self::Ok, anyhow::Error> {
+
+    async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<Self, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let _row = sqlx::query!(
+        let row = sqlx::query!(
             "select * from Resumes where resume_id = $1 and not deleted",
             id
         )
         .fetch_one(&mut conn)
         .await?;
-        todo!()
+        Ok(Resume {
+            resume_id: id.clone(),
+            user_id: Index::new(row.user_id),
+            resume_text: row.resume_text,
+        })
     }
 }
 
@@ -95,7 +98,7 @@ pub struct SearchContext {
 #[async_trait]
 impl FetchId for SearchContext {
     type Id = i32;
-    type Ok = Self;
+
     async fn fetch_id(id: &i32, pool: Pool<Postgres>) -> Result<SearchContext, anyhow::Error> {
         let mut conn = pool.acquire().await?;
         let row = sqlx::query!(
@@ -125,7 +128,7 @@ pub struct Proposal {
 #[async_trait]
 impl FetchId for Proposal {
     type Id = i32;
-    type Ok = Self;
+
     async fn fetch_id(id: &i32, pool: Pool<Postgres>) -> Result<Proposal, anyhow::Error> {
         let mut conn = pool.acquire().await?;
         let row = sqlx::query!("select * from Proposals where proposal_id = $1", id,)
@@ -156,7 +159,7 @@ pub struct Job {
 #[async_trait]
 impl FetchId for Job {
     type Id = i32;
-    type Ok = Self;
+
     async fn fetch_id(id: &i32, pool: Pool<Postgres>) -> Result<Job, anyhow::Error> {
         let mut conn = pool.acquire().await?;
         let row = sqlx::query!("select * from jobs where job_id = $1", id)
@@ -198,34 +201,26 @@ pub struct PendingJob {
 #[async_trait]
 impl FetchId for PendingJob {
     type Id = (Id<Job>, Id<User>);
-    type Ok = Vec<Self>;
 
-    async fn fetch_id(
-        id: &Self::Id,
-        pool: Pool<Postgres>,
-    ) -> Result<Vec<PendingJob>, anyhow::Error> {
+    async fn fetch_id(id: &Self::Id, pool: Pool<Postgres>) -> Result<PendingJob, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let _records = sqlx::query!(
+        let record = sqlx::query!(
             "SELECT * FROM PendingJobs WHERE job_id = $1 AND user_id = $2",
             id.0,
             id.1,
         )
-        .fetch_all(&mut conn)
-        .await?
-        .iter()
-        .flat_map(|record| {
-            Ok::<_, anyhow::Error>(PendingJob {
-                job_id: Index::new(record.job_id),
-                user_id: Index::new(record.user_id),
-                proposal_id: Index::new(
-                    record
-                        .proposal_id
-                        .context("found pending job without proposal")?,
-                ),
-            })
+        .fetch_one(&mut conn)
+        .await?;
+
+        Ok::<_, anyhow::Error>(PendingJob {
+            job_id: Index::new(record.job_id),
+            user_id: Index::new(record.user_id),
+            proposal_id: Index::new(
+                record
+                    .proposal_id
+                    .context("found pending job without proposal")?,
+            ),
         })
-        .collect::<Vec<_>>();
-        todo!()
     }
 }
 
