@@ -167,7 +167,6 @@ async fn next_pending_job(
     let login_cookie = state.verify_user(req)?;
     let database = &state.database;
     let user = &login_cookie.user;
-    //use crate::db::Job;
     let pending_jobs1 = database
         .get_user_pending_jobs(user)
         .await
@@ -180,9 +179,6 @@ async fn next_pending_job(
             .query(&[
                 ("job", job.job_id),
                 ("user_id", user.0.user_id),
-                //("job", job.to_string()),
-                //("username", user.0.username),
-                //("password", user.0.password_digest.clone()),
             ])
             .send()
             .await
