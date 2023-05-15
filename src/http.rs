@@ -4,6 +4,7 @@
 // pending_job_actions = (reject, proposal)
 // request_proposal(job_id)
 
+use anyhow::anyhow;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -85,6 +86,8 @@ enum AppError {
     InvalidSession,
     #[error("input deserialization failed `{0}`")]
     InvalidShape(String),
+    #[error("Internal error `{0}`")]
+    InternalError(anyhow::Error),
 }
 
 impl ResponseError for AppError {}
@@ -147,6 +150,55 @@ async fn pending_jobs(
 
     Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
 }
+
+use futures::StreamExt;
+use reqwest::Client;
+
+#[derive(Deserialize)]
+struct ClassifyResponse {
+    classification: i32,
+}
+
+#[get("/next_pending_job")]
+async fn next_pending_job(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req)?;
+    let database = &state.database;
+    let user = &login_cookie.user;
+    //use crate::db::Job;
+    let pending_jobs1 = database
+        .get_user_pending_jobs(user)
+        .await
+        .map_err(|e| AppError::DatabaseError(e))?;
+
+    let client = Client::new();
+    for job in pending_jobs1 {
+        let res = client
+            .get("http://0.0.0.0:8080/classify_job")
+            .query(&[
+                ("job", job.to_string()),
+                ("username", user.0.username),
+                ("password", user.0.password_digest.clone()),
+            ])
+            .send()
+            .await
+            .map_err(|e| AppError::InternalError(e.into()))?;
+
+        let res_json: ClassifyResponse = res
+            .json()
+            .await
+            .map_err(|e| AppError::InternalError(e.into()))?;
+
+        if res_json.classification == 0 {
+            return Ok(web::Json(job));
+        }
+    }
+
+    Err(AppError::InternalError(anyhow!("No pending jobs")))
+}
+
 #[derive(Deserialize)]
 struct SearchContextReq {
     resume_text: String,
