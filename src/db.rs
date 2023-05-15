@@ -17,7 +17,8 @@ use typed_builder::TypedBuilder;
 pub struct User {
     pub user_id: i32,
     pub username: String,
-    pub password_digest: String, }
+    //pub password_digest: String, }
+}
 
 // doesn't implement Clone on purpose,
 // with Clone many instances of a single verified user can exist
@@ -44,13 +45,13 @@ impl FetchId for User {
 
     async fn fetch_id(id: &i32, pool: Pool<Postgres>) -> Result<User, anyhow::Error> {
         let mut conn = pool.acquire().await?;
-        let row = sqlx::query!("select user_id, username, password_digest from users where user_id = $1", id)
+        let row = sqlx::query!("select user_id, username from users where user_id = $1", id)
             .fetch_one(&mut conn)
             .await?;
         let user = User {
             username: row.username,
             user_id: row.user_id,
-            password_digest: row.password_digest.expect("User has no password"),
+            //password_digest: row.password_digest.expect("User has no password"),
         };
         Ok(user)
     }
@@ -145,7 +146,7 @@ impl FetchId for Proposal {
 #[derive(Debug, Clone, TypedBuilder, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Job {
-    job_id: i32,
+    pub job_id: i32,
     title: String,
     website: String,
     description: String,
@@ -260,7 +261,7 @@ impl Database {
         Ok(VerifiedUser(User {
             username,
             user_id: record.user_id,
-            password_digest: password,
+            //password_digest: password,
         }))
     }
 
@@ -283,7 +284,7 @@ impl Database {
         let verified_user = User {
             user_id: record.user_id,
             username,
-            password_digest: password,
+            //password_digest: password,
         };
 
         Ok(VerifiedUser(verified_user))

@@ -178,9 +178,11 @@ async fn next_pending_job(
         let res = client
             .get("http://0.0.0.0:8080/classify_job")
             .query(&[
-                ("job", job.to_string()),
-                ("username", user.0.username),
-                ("password", user.0.password_digest.clone()),
+                ("job", job.job_id),
+                ("user_id", user.0.user_id),
+                //("job", job.to_string()),
+                //("username", user.0.username),
+                //("password", user.0.password_digest.clone()),
             ])
             .send()
             .await
