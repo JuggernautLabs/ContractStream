@@ -20,13 +20,15 @@ use actix_web::{
     web::{self, Data, Form, Json},
     App, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError,
 };
-use env_logger::Env;
+use log::info;
 use serde::Deserialize;
 
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::db::{Database, VerifiedUser};
+
+static PY_URL: &str = "http://0.0.0.0:8081";
 
 #[derive(PartialEq)]
 struct LoginCookie {
@@ -175,7 +177,7 @@ async fn next_pending_job(
     let client = Client::new();
     for job in pending_jobs1 {
         let res = client
-            .get("http://0.0.0.0:8080/classify_job")
+            .get(format!("{}/classify_job", PY_URL))
             .query(&[
                 ("job", job.job_id),
                 ("user_id", user.0.user_id),
@@ -189,13 +191,39 @@ async fn next_pending_job(
             .await
             .map_err(|e| AppError::InternalError(e.into()))?;
 
-        if res_json.classification == 0 {
+        // -1 means no class and 0 means acceptable
+        if res_json.classification < 1 {
             return Ok(web::Json(job));
         }
     }
 
     Err(AppError::InternalError(anyhow!("No pending jobs")))
 }
+
+/*
+#[get("/generate_proposal")]
+async fn get_proposal(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req)?;
+    let database = &state.database;
+    let user = &login_cookie.user;
+
+    let client = Client::new();
+
+    let res = client
+        .get("http://0.0.0.0:8080/generate_proposal")
+        .query(&[
+            ("job", job.job_id),
+            ("user_id", user.0.user_id),
+        ])
+        .send()
+        .await
+        .map_err(|e| AppError::InternalError(e.into()))?;
+}
+*/
+
 
 #[derive(Deserialize)]
 struct SearchContextReq {
@@ -317,6 +345,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(login)
             .service(signup)
             .service(pending_jobs)
+            .service(next_pending_job)
             .service(post_search_context)
             .service(active_searches)
             .service(delete_search_context);
