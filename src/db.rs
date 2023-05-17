@@ -377,7 +377,7 @@ impl Database {
             job_id,
             accepted,
         )
-        .fetch_one(&mut conn)
+        .execute(&mut conn)
         .await?;
 
         Ok(())

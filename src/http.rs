@@ -373,7 +373,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
     };
     let app_data = Arc::new(app_data);
 
-    std::env::set_var("RUST_LOG", "actix_web=info");
+    //std::env::set_var("RUST_LOG", "actix_web=info");
     env_logger::init();
 
     HttpServer::new(move || {
