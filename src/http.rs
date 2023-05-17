@@ -153,12 +153,16 @@ async fn pending_jobs(
     Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
 }
 
-use futures::StreamExt;
 use reqwest::Client;
 
 #[derive(Deserialize)]
 struct ClassifyResponse {
     classification: i32,
+}
+
+#[derive(Deserialize)]
+struct ProposalResponse {
+    proposal: String,
 }
 
 #[get("/next_pending_job")]
@@ -179,7 +183,7 @@ async fn next_pending_job(
         let res = client
             .get(format!("{}/classify_job", PY_URL))
             .query(&[
-                ("job", job.job_id),
+                ("job_id", job.job_id),
                 ("user_id", user.0.user_id),
             ])
             .send()
@@ -191,8 +195,8 @@ async fn next_pending_job(
             .await
             .map_err(|e| AppError::InternalError(e.into()))?;
 
-        // -1 means no class and 0 means acceptable
-        if res_json.classification < 1 {
+        // -1 means no class and 1 means acceptable
+        if res_json.classification != 0 {
             return Ok(web::Json(job));
         }
     }
@@ -200,29 +204,43 @@ async fn next_pending_job(
     Err(AppError::InternalError(anyhow!("No pending jobs")))
 }
 
-/*
 #[get("/generate_proposal")]
-async fn get_proposal(
+async fn generate_proposal(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req)?;
-    let database = &state.database;
+    #[derive(Deserialize)]
+    pub struct QueryParams {
+        job_id: String,
+    }
+
+    let login_cookie = state.verify_user(req.clone())?;
+    //let database = &state.database;
     let user = &login_cookie.user;
+    use actix_web::web;
+    let params = web::Query::<QueryParams>::from_query(req.query_string())
+        .map_err(|_| AppError::InvalidShape("No field 'job_id' in query".to_string()))?;
+    let job_id = params.job_id.clone();
 
     let client = Client::new();
 
     let res = client
-        .get("http://0.0.0.0:8080/generate_proposal")
+        .get(format!("{}/generate_proposal", PY_URL))
         .query(&[
-            ("job", job.job_id),
-            ("user_id", user.0.user_id),
+            ("job_id", job_id),
+            ("user_id", user.0.user_id.to_string()),
         ])
         .send()
         .await
         .map_err(|e| AppError::InternalError(e.into()))?;
+
+    let res_json: ProposalResponse = res
+        .json()
+        .await
+        .map_err(|e| AppError::InternalError(e.into()))?;
+
+    return Ok(web::Json(res_json.proposal))
 }
-*/
 
 
 #[derive(Deserialize)]
@@ -346,6 +364,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(signup)
             .service(pending_jobs)
             .service(next_pending_job)
+            .service(generate_proposal)
             .service(post_search_context)
             .service(active_searches)
             .service(delete_search_context);
