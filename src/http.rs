@@ -26,7 +26,10 @@ use serde::Deserialize;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::db::{Database, VerifiedUser};
+use crate::db::{
+    Database, VerifiedUser, Job
+};
+use crate::db_utils::FetchId;
 
 static PY_URL: &str = "http://0.0.0.0:8081";
 
@@ -204,21 +207,20 @@ async fn next_pending_job(
     Err(AppError::InternalError(anyhow!("No pending jobs")))
 }
 
+#[derive(Deserialize)]
+pub struct JobIdParam {
+    job_id: String,
+}
+
 #[get("/generate_proposal")]
 async fn generate_proposal(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    #[derive(Deserialize)]
-    pub struct QueryParams {
-        job_id: String,
-    }
-
     let login_cookie = state.verify_user(req.clone())?;
-    //let database = &state.database;
     let user = &login_cookie.user;
     use actix_web::web;
-    let params = web::Query::<QueryParams>::from_query(req.query_string())
+    let params = web::Query::<JobIdParam>::from_query(req.query_string())
         .map_err(|_| AppError::InvalidShape("No field 'job_id' in query".to_string()))?;
     let job_id = params.job_id.clone();
 
@@ -242,6 +244,25 @@ async fn generate_proposal(
     return Ok(web::Json(res_json.proposal))
 }
 
+#[get("/accept_job")]
+async fn accept_job(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req.clone())?;
+    let user = &login_cookie.user;
+    let db = &state.database;
+    let params = web::Query::<JobIdParam>::from_query(req.query_string())
+        .map_err(|_| AppError::InvalidShape("No field 'job_id' in query".to_string()))?;
+    let jobid_param = params.job_id.parse::<i32>()
+        .map_err(|e| AppError::InternalError(e.into()))?;
+    let job = Job::fetch_id(&jobid_param, db.pool.clone()).await?;
+
+    db.add_decided_job(user, job.job_id, true).await?;
+    db.remove_pending_job(user, job.job_id).await?;
+
+    return Ok("")
+}
 
 #[derive(Deserialize)]
 struct SearchContextReq {
@@ -365,6 +386,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(pending_jobs)
             .service(next_pending_job)
             .service(generate_proposal)
+            .service(accept_job)
             .service(post_search_context)
             .service(active_searches)
             .service(delete_search_context);

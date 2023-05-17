@@ -361,6 +361,28 @@ impl Database {
             record.job_id.context("job_id not returned, fatal error")?,
         ))
     }
+    pub async fn add_decided_job(
+        &self,
+        user: &VerifiedUser,
+        job_id: Id<Job>,
+        accepted: bool,
+    ) -> Result<(), anyhow::Error> {
+        let mut conn = self.pool.acquire().await?;
+
+        sqlx::query!(
+            r"INSERT INTO DecidedJobs
+            (user_id, job_id, accepted)
+            VALUES ($1, $2, $3)",
+            user.0.user_id,
+            job_id,
+            accepted,
+        )
+        .fetch_one(&mut conn)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn get_user_denied_jobs(
         &self,
         username: &str,
@@ -519,15 +541,16 @@ impl Database {
 
         Ok(decided_jobs)
     }
-    pub async fn remove_pending_job(&self, job_id: Id<Job>) -> Result<(), anyhow::Error> {
+    pub async fn remove_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
 
         let _rows = sqlx::query!(
             r#"
         DELETE FROM PendingJobs
-        WHERE job_id = $1;
+        WHERE job_id = $2 AND user_id = $1;
         "#,
-            job_id
+            user.0.user_id,
+            job_id,
         )
         .fetch_all(&mut conn)
         .await?;
