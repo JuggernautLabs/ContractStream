@@ -264,6 +264,26 @@ async fn accept_job(
     return Ok("")
 }
 
+#[get("/reject_job")]
+async fn reject_job(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req.clone())?;
+    let user = &login_cookie.user;
+    let db = &state.database;
+    let params = web::Query::<JobIdParam>::from_query(req.query_string())
+        .map_err(|_| AppError::InvalidShape("No field 'job_id' in query".to_string()))?;
+    let jobid_param = params.job_id.parse::<i32>()
+        .map_err(|e| AppError::InternalError(e.into()))?;
+    let job = Job::fetch_id(&jobid_param, db.pool.clone()).await?;
+
+    db.add_decided_job(user, job.job_id, false).await?;
+    db.remove_pending_job(user, job.job_id).await?;
+
+    return Ok("")
+}
+
 #[derive(Deserialize)]
 struct SearchContextReq {
     resume_text: String,
@@ -387,6 +407,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(next_pending_job)
             .service(generate_proposal)
             .service(accept_job)
+            .service(reject_job)
             .service(post_search_context)
             .service(active_searches)
             .service(delete_search_context);
@@ -396,4 +417,33 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
     .run()
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::db::Database;
+    use sqlx::postgres::PgPoolOptions;
+    use std::env;
+
+    async fn db() -> Result<Database, anyhow::Error> {
+        /*
+        let database_url =
+            env::var("DATABASE_URL")
+            .map_err(|_err| anyhow::anyhow!("Please specify database url"))?;
+        */
+        let database_url = "postgres://super:isGod@localhost:5432/auto_contractor".to_string();
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&database_url)
+            .await?;
+        let database = Database::new(pool);
+        Ok(database)
+    }
+
+    #[tokio::test]
+    async fn accept_jobs() {
+        let db = db().await.unwrap();
+        db.drop_non_user_tables().await.unwrap();
+        db.create_tables().await.unwrap();
+    }
 }

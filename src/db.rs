@@ -705,6 +705,34 @@ impl Database {
 
         Ok(result)
     }
+
+    pub async fn drop_non_user_tables(&self) -> Result<(), sqlx::Error> {
+        let mut pool = self.pool.acquire().await?;
+        sqlx::query!("DROP TABLE IF EXISTS DecidedJobs;").execute(&mut pool).await?;
+        sqlx::query!("DROP TABLE IF EXISTS PendingJobs;").execute(&mut pool).await?;
+        sqlx::query!("DROP TABLE IF EXISTS Proposals;").execute(&mut pool).await?;
+        sqlx::query!("DROP TABLE IF EXISTS Jobs;").execute(&mut pool).await?;
+
+        Ok(())
+    }
+
+    pub async fn create_tables(&self) -> Result<(), Box<dyn std::error::Error>> {
+        use std::fs;
+        let mut pool = self.pool.acquire().await?;
+        let migrations = fs::read_to_string("migrations/20230423002116_create_tables.sql")?;
+        let migrations: Vec<&str> = migrations.split(';').collect();
+
+        // Execute each migration
+        for migration in migrations {
+            if migration.trim().is_empty() {
+                continue;
+            }
+            
+            sqlx::query(migration).execute(&mut pool).await?;
+        }
+
+        Ok(())
+    }
 }
 
 // async fn get_all_pending_jobs(pool: &Pool<Postgres>, username: &str) -> Result<Vec<(Box<Dyn)>, anyhow::Error> {
