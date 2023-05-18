@@ -1,5 +1,5 @@
 -- Add migration script here
-CREATE EXTENSION pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 
 
