@@ -26,9 +26,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::db::{
-    Database, VerifiedUser, Job
-};
+use crate::db::{Database, Job, VerifiedUser};
 use crate::db_utils::FetchId;
 
 static PY_URL: &str = "http://0.0.0.0:8081";
@@ -185,10 +183,7 @@ async fn next_pending_job(
     for job in pending_jobs1 {
         let res = client
             .get(format!("{}/classify_job", PY_URL))
-            .query(&[
-                ("job_id", job.job_id),
-                ("user_id", user.0.user_id),
-            ])
+            .query(&[("job_id", job.job_id), ("user_id", user.0.user_id)])
             .send()
             .await
             .map_err(|e| AppError::InternalError(e.into()))?;
@@ -207,11 +202,9 @@ async fn next_pending_job(
     Err(AppError::InternalError(anyhow!("No pending jobs")))
 }
 
-#[derive(Deserialize)]
-pub struct JobIdParam {
-    job_id: String,
-}
-
+// this needs to validate that a given job has been assigned to a particular user
+// or we say screw it, generate a job for any job you want
+// it's their money after all
 #[get("/generate_proposal")]
 async fn generate_proposal(
     req: HttpRequest,
@@ -228,10 +221,7 @@ async fn generate_proposal(
 
     let res = client
         .get(format!("{}/generate_proposal", PY_URL))
-        .query(&[
-            ("job_id", job_id),
-            ("user_id", user.0.user_id.to_string()),
-        ])
+        .query(&[("job_id", job_id), ("user_id", user.0.user_id.to_string())])
         .send()
         .await
         .map_err(|e| AppError::InternalError(e.into()))?;
@@ -241,10 +231,14 @@ async fn generate_proposal(
         .await
         .map_err(|e| AppError::InternalError(e.into()))?;
 
-    return Ok(web::Json(res_json.proposal))
+    return Ok(web::Json(res_json.proposal));
 }
 
-#[get("/accept_job")]
+#[derive(Deserialize)]
+pub struct JobIdParam {
+    job_id: String,
+}
+#[post("/accept_job")]
 async fn accept_job(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
@@ -254,17 +248,20 @@ async fn accept_job(
     let db = &state.database;
     let params = web::Query::<JobIdParam>::from_query(req.query_string())
         .map_err(|_| AppError::InvalidShape("No field 'job_id' in query".to_string()))?;
-    let jobid_param = params.job_id.parse::<i32>()
+    let jobid_param = params
+        .job_id
+        .parse::<i32>()
         .map_err(|e| AppError::InternalError(e.into()))?;
     let job = Job::fetch_id(&jobid_param, db.pool.clone()).await?;
 
-    db.accept_pending_job(user, job.job_id).await
+    db.accept_pending_job(user, job.job_id)
+        .await
         .map_err(|e| AppError::DatabaseError(e.into()))?;
 
-    return Ok("")
+    return Ok("");
 }
 
-#[get("/reject_job")]
+#[post("/reject_job")]
 async fn reject_job(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
@@ -274,14 +271,17 @@ async fn reject_job(
     let db = &state.database;
     let params = web::Query::<JobIdParam>::from_query(req.query_string())
         .map_err(|_| AppError::InvalidShape("No field 'job_id' in query".to_string()))?;
-    let jobid_param = params.job_id.parse::<i32>()
+    let jobid_param = params
+        .job_id
+        .parse::<i32>()
         .map_err(|e| AppError::InternalError(e.into()))?;
     let job = Job::fetch_id(&jobid_param, db.pool.clone()).await?;
 
-    db.reject_pending_job(user, job.job_id).await
+    db.reject_pending_job(user, job.job_id)
+        .await
         .map_err(|e| AppError::DatabaseError(e.into()))?;
 
-    return Ok("")
+    return Ok("");
 }
 
 #[derive(Deserialize)]
@@ -351,24 +351,6 @@ async fn delete_search_context(
     Ok(HttpResponse::Ok())
 }
 
-#[get("/active_searches")]
-async fn active_searches(
-    req: HttpRequest,
-    state: Data<Arc<AppState>>,
-) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req)?;
-    let user = &login_cookie.user;
-
-    let database = &state.database;
-
-    let search_contexts = database
-        .get_search_contexts_by_user(user)
-        .await
-        .map_err(AppError::DatabaseError)?;
-
-    Ok(HttpResponse::Ok().body(serde_json::to_string(&search_contexts).unwrap()))
-}
-
 // #[get("/filtered_jobs")]
 // async fn filtered_jobs(
 //     req: HttpRequest,
@@ -409,7 +391,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(accept_job)
             .service(reject_job)
             .service(post_search_context)
-            .service(active_searches)
+            // .service(active_searches)
             .service(delete_search_context);
         app
     })
@@ -446,24 +428,30 @@ mod tests {
         db.drop_non_user_tables().await.unwrap();
         db.create_tables().await.unwrap();
         let username = "Jay".to_string();
-        let user = db.get_user(username.clone(), "isPleb".to_string()).await.unwrap();
+        let user = db
+            .get_user(username.clone(), "isPleb".to_string())
+            .await
+            .unwrap();
 
-        let job = db.add_job(
-            "title".to_string(),
-            "website".to_string(),
-            "description".to_string(),
-            Some(1.into()),
-            Some(1.into()),
-            "post_url".to_string(),
-            None,
-        ).await.unwrap();
+        let job = db
+            .add_job(
+                "title".to_string(),
+                "website".to_string(),
+                "description".to_string(),
+                Some(1.into()),
+                Some(1.into()),
+                "post_url".to_string(),
+                None,
+            )
+            .await
+            .unwrap();
 
         db.add_decided_job(&user, job.job_id, true).await.unwrap();
 
         assert_eq!(
             db.get_user_accepted_jobs(&username).await.unwrap(),
             vec![job],
-            );
+        );
     }
 
     #[tokio::test]
@@ -472,32 +460,33 @@ mod tests {
         db.drop_non_user_tables().await.unwrap();
         db.create_tables().await.unwrap();
         let username = "Jay".to_string();
-        let user = db.get_user(username.clone(), "isPleb".to_string()).await.unwrap();
+        let user = db
+            .get_user(username.clone(), "isPleb".to_string())
+            .await
+            .unwrap();
 
-        let job = db.add_job(
-            "title".to_string(),
-            "website".to_string(),
-            "description".to_string(),
-            Some(1.into()),
-            Some(1.into()),
-            "post_url".to_string(),
-            None,
-        ).await.unwrap();
-
-
+        let job = db
+            .add_job(
+                "title".to_string(),
+                "website".to_string(),
+                "description".to_string(),
+                Some(1.into()),
+                Some(1.into()),
+                "post_url".to_string(),
+                None,
+            )
+            .await
+            .unwrap();
 
         db.add_decided_job(&user, job.job_id, false).await.unwrap();
 
         assert_eq!(
             db.get_user_rejected_jobs(&username).await.unwrap(),
             vec![job.clone()],
-            );
+        );
 
         // TODO right now this doesnt test anything since there's no add_pending_job fn
         db.remove_pending_job(&user, job.job_id).await.unwrap();
-        assert_eq!(
-            db.get_user_pending_jobs(&user).await.unwrap(),
-            vec![],
-            );
+        assert_eq!(db.get_user_pending_jobs(&user).await.unwrap(), vec![],);
     }
 }

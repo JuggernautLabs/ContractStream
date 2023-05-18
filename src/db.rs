@@ -150,7 +150,9 @@ pub struct Job {
     title: String,
     website: String,
     description: String,
+    #[ts(type = "number")]
     budget: Option<BigDecimal>,
+    #[ts(type = "number")]
     hourly: Option<BigDecimal>,
     post_url: String,
     summary: Option<String>,
@@ -457,7 +459,7 @@ impl Database {
     pub async fn get_user_rejected_jobs(
         &self,
         username: &str,
-    //) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
+        //) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
     ) -> Result<Vec<Job>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
 
@@ -470,7 +472,9 @@ impl Database {
         WHERE u.username = $1 AND d.accepted = false;
         "#,
             username,
-        ).fetch_all(&mut conn).await?;
+        )
+        .fetch_all(&mut conn)
+        .await?;
 
         let rejected_jobs = rows
             .into_iter()
@@ -491,7 +495,7 @@ impl Database {
     pub async fn get_user_accepted_jobs(
         &self,
         username: &str,
-    //) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
+        //) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
     ) -> Result<Vec<Job>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
 
@@ -515,7 +519,9 @@ impl Database {
         WHERE u.username = $1 AND d.accepted = true;
         "#,
             username,
-        ).fetch_all(&mut conn).await?;
+        )
+        .fetch_all(&mut conn)
+        .await?;
 
         let accepted_jobs = rows
             .into_iter()
@@ -576,7 +582,11 @@ impl Database {
 
         Ok(decided_jobs)
     }
-    pub async fn remove_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), sqlx::Error> {
+    pub async fn remove_pending_job(
+        &self,
+        user: &VerifiedUser,
+        job_id: Id<Job>,
+    ) -> Result<(), sqlx::Error> {
         let mut conn = self.pool.acquire().await?;
 
         let _rows = sqlx::query!(
@@ -743,14 +753,22 @@ impl Database {
 
     /// Add an existing pending job to the [DecidedJob] table as accepted and remove it from
     /// the [PendingJob] table
-    pub async fn accept_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), sqlx::Error> {
+    pub async fn accept_pending_job(
+        &self,
+        user: &VerifiedUser,
+        job_id: Id<Job>,
+    ) -> Result<(), sqlx::Error> {
         self.add_decided_job(user, job_id, true).await?;
         self.remove_pending_job(user, job_id).await?;
         Ok(())
     }
     /// Add an existing pending job to the [DecidedJob] table as rejected and remove it from
     /// the [PendingJob] table
-    pub async fn reject_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), sqlx::Error> {
+    pub async fn reject_pending_job(
+        &self,
+        user: &VerifiedUser,
+        job_id: Id<Job>,
+    ) -> Result<(), sqlx::Error> {
         self.add_decided_job(user, job_id, false).await?;
         self.remove_pending_job(user, job_id).await?;
         Ok(())
@@ -758,10 +776,18 @@ impl Database {
 
     pub async fn drop_non_user_tables(&self) -> Result<(), sqlx::Error> {
         let mut pool = self.pool.acquire().await?;
-        sqlx::query!("DROP TABLE IF EXISTS DecidedJobs;").execute(&mut pool).await?;
-        sqlx::query!("DROP TABLE IF EXISTS PendingJobs;").execute(&mut pool).await?;
-        sqlx::query!("DROP TABLE IF EXISTS Proposals;").execute(&mut pool).await?;
-        sqlx::query!("DROP TABLE IF EXISTS Jobs;").execute(&mut pool).await?;
+        sqlx::query!("DROP TABLE IF EXISTS DecidedJobs;")
+            .execute(&mut pool)
+            .await?;
+        sqlx::query!("DROP TABLE IF EXISTS PendingJobs;")
+            .execute(&mut pool)
+            .await?;
+        sqlx::query!("DROP TABLE IF EXISTS Proposals;")
+            .execute(&mut pool)
+            .await?;
+        sqlx::query!("DROP TABLE IF EXISTS Jobs;")
+            .execute(&mut pool)
+            .await?;
 
         Ok(())
     }
@@ -777,7 +803,7 @@ impl Database {
             if migration.trim().is_empty() {
                 continue;
             }
-            
+
             sqlx::query(migration).execute(&mut pool).await?;
         }
 
