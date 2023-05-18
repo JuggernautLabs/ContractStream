@@ -258,8 +258,8 @@ async fn accept_job(
         .map_err(|e| AppError::InternalError(e.into()))?;
     let job = Job::fetch_id(&jobid_param, db.pool.clone()).await?;
 
-    db.add_decided_job(user, job.job_id, true).await?;
-    db.remove_pending_job(user, job.job_id).await?;
+    db.accept_pending_job(user, job.job_id).await
+        .map_err(|e| AppError::DatabaseError(e.into()))?;
 
     return Ok("")
 }
@@ -278,8 +278,8 @@ async fn reject_job(
         .map_err(|e| AppError::InternalError(e.into()))?;
     let job = Job::fetch_id(&jobid_param, db.pool.clone()).await?;
 
-    db.add_decided_job(user, job.job_id, false).await?;
-    db.remove_pending_job(user, job.job_id).await?;
+    db.reject_pending_job(user, job.job_id).await
+        .map_err(|e| AppError::DatabaseError(e.into()))?;
 
     return Ok("")
 }
@@ -441,9 +441,63 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn accept_jobs() {
+    async fn accept_job() {
         let db = db().await.unwrap();
         db.drop_non_user_tables().await.unwrap();
         db.create_tables().await.unwrap();
+        let username = "Jay".to_string();
+        let user = db.get_user(username.clone(), "isPleb".to_string()).await.unwrap();
+
+        let job = db.add_job(
+            "title".to_string(),
+            "website".to_string(),
+            "description".to_string(),
+            Some(1.into()),
+            Some(1.into()),
+            "post_url".to_string(),
+            None,
+        ).await.unwrap();
+
+        db.add_decided_job(&user, job.job_id, true).await.unwrap();
+
+        assert_eq!(
+            db.get_user_accepted_jobs(&username).await.unwrap(),
+            vec![job],
+            );
+    }
+
+    #[tokio::test]
+    async fn reject_job() {
+        let db = db().await.unwrap();
+        db.drop_non_user_tables().await.unwrap();
+        db.create_tables().await.unwrap();
+        let username = "Jay".to_string();
+        let user = db.get_user(username.clone(), "isPleb".to_string()).await.unwrap();
+
+        let job = db.add_job(
+            "title".to_string(),
+            "website".to_string(),
+            "description".to_string(),
+            Some(1.into()),
+            Some(1.into()),
+            "post_url".to_string(),
+            None,
+        ).await.unwrap();
+
+
+
+        db.add_decided_job(&user, job.job_id, false).await.unwrap();
+
+        assert_eq!(
+            db.get_user_rejected_jobs(&username).await.unwrap(),
+            vec![job.clone()],
+            );
+
+        // TODO right now this doesnt test anything since there's no add_pending_job fn
+        db.remove_pending_job(&user, job.job_id).await.unwrap();
+        assert_eq!(
+            db.get_user_pending_jobs(&user).await.unwrap(),
+            vec![],
+            );
     }
 }

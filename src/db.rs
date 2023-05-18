@@ -143,7 +143,7 @@ impl FetchId for Proposal {
     }
 }
 
-#[derive(Debug, Clone, TypedBuilder, Default, Serialize, Deserialize, TS)]
+#[derive(PartialEq, Eq, Debug, Clone, TypedBuilder, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Job {
     pub job_id: i32,
@@ -366,7 +366,7 @@ impl Database {
         user: &VerifiedUser,
         job_id: Id<Job>,
         accepted: bool,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), sqlx::Error> {
         let mut conn = self.pool.acquire().await?;
 
         sqlx::query!(
@@ -383,6 +383,7 @@ impl Database {
         Ok(())
     }
 
+    /*
     pub async fn get_user_denied_jobs(
         &self,
         username: &str,
@@ -429,6 +430,7 @@ impl Database {
 
         Ok(denied_jobs)
     }
+    */
 
     pub async fn get_user_pending_jobs(
         &self,
@@ -452,12 +454,48 @@ impl Database {
 
         Ok(rows)
     }
+    pub async fn get_user_rejected_jobs(
+        &self,
+        username: &str,
+    //) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
+    ) -> Result<Vec<Job>, anyhow::Error> {
+        let mut conn = self.pool.acquire().await?;
+
+        let rows = sqlx::query!(
+            r#"
+        SELECT j.*
+        FROM Jobs j
+        JOIN DecidedJobs d ON j.job_id = d.job_id
+        JOIN Users u ON d.user_id = u.user_id
+        WHERE u.username = $1 AND d.accepted = false;
+        "#,
+            username,
+        ).fetch_all(&mut conn).await?;
+
+        let rejected_jobs = rows
+            .into_iter()
+            .map(|row| Job {
+                job_id: row.job_id,
+                title: row.title,
+                website: row.website,
+                description: row.description,
+                budget: row.budget,
+                hourly: row.hourly,
+                post_url: row.post_url,
+                summary: row.summary,
+            })
+            .collect();
+
+        Ok(rejected_jobs)
+    }
     pub async fn get_user_accepted_jobs(
         &self,
         username: &str,
-    ) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
+    //) -> Result<Vec<(Job, Proposal)>, anyhow::Error> {
+    ) -> Result<Vec<Job>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
 
+        /*
         let rows = sqlx::query!(
             r#"
         SELECT j.*, p.proposal_id, p.user_id AS p_user_id, p.job_id AS p_job_id, p.proposal
@@ -467,32 +505,29 @@ impl Database {
         JOIN Users u ON d.user_id = u.user_id
         WHERE u.username = $1 AND d.accepted = true;
         "#,
+        */
+        let rows = sqlx::query!(
+            r#"
+        SELECT j.*
+        FROM Jobs j
+        JOIN DecidedJobs d ON j.job_id = d.job_id
+        JOIN Users u ON d.user_id = u.user_id
+        WHERE u.username = $1 AND d.accepted = true;
+        "#,
             username,
-        )
-        .fetch_all(&mut conn)
-        .await?;
+        ).fetch_all(&mut conn).await?;
 
         let accepted_jobs = rows
             .into_iter()
-            .map(|row| {
-                (
-                    Job {
-                        job_id: row.job_id,
-                        title: row.title,
-                        website: row.website,
-                        description: row.description,
-                        budget: row.budget,
-                        hourly: row.hourly,
-                        post_url: row.post_url,
-                        summary: row.summary,
-                    },
-                    Proposal {
-                        proposal_id: row.proposal_id,
-                        user_id: Index::<User>::new(row.p_user_id),
-                        job_id: Index::<Job>::new(row.p_job_id),
-                        proposal: row.proposal,
-                    },
-                )
+            .map(|row| Job {
+                job_id: row.job_id,
+                title: row.title,
+                website: row.website,
+                description: row.description,
+                budget: row.budget,
+                hourly: row.hourly,
+                post_url: row.post_url,
+                summary: row.summary,
             })
             .collect();
 
@@ -541,7 +576,7 @@ impl Database {
 
         Ok(decided_jobs)
     }
-    pub async fn remove_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), anyhow::Error> {
+    pub async fn remove_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), sqlx::Error> {
         let mut conn = self.pool.acquire().await?;
 
         let _rows = sqlx::query!(
@@ -704,6 +739,21 @@ impl Database {
             .collect::<Vec<SearchContext>>();
 
         Ok(result)
+    }
+
+    /// Add an existing pending job to the [DecidedJob] table as accepted and remove it from
+    /// the [PendingJob] table
+    pub async fn accept_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), sqlx::Error> {
+        self.add_decided_job(user, job_id, true).await?;
+        self.remove_pending_job(user, job_id).await?;
+        Ok(())
+    }
+    /// Add an existing pending job to the [DecidedJob] table as rejected and remove it from
+    /// the [PendingJob] table
+    pub async fn reject_pending_job(&self, user: &VerifiedUser, job_id: Id<Job>) -> Result<(), sqlx::Error> {
+        self.add_decided_job(user, job_id, false).await?;
+        self.remove_pending_job(user, job_id).await?;
+        Ok(())
     }
 
     pub async fn drop_non_user_tables(&self) -> Result<(), sqlx::Error> {
