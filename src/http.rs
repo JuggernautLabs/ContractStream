@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+use ts_rs::TS;
 
 use actix_web::{
     cookie::{time::Duration, Cookie},
@@ -135,6 +136,15 @@ async fn signup(
         .await
         .map_err(AppError::SignupError)?;
     Ok(HttpResponse::Ok().body(format!("{:?}", user)))
+}
+
+#[get("/check_login")]
+async fn check_login(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req)?;
+    Ok(HttpResponse::Ok())
 }
 
 #[get("/pending_jobs")]
@@ -284,7 +294,8 @@ async fn reject_job(
     return Ok("");
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, TS)]
+#[ts(export)]
 struct SearchContextReq {
     resume_text: String,
     keywords: Vec<String>,
@@ -384,6 +395,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .wrap(Logger::new("%a %{User-Agent}i"))
             .app_data(web::Data::new(app_data.clone()))
             .service(login)
+            .service(check_login)
             .service(signup)
             .service(pending_jobs)
             .service(next_pending_job)
@@ -393,6 +405,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(post_search_context)
             // .service(active_searches)
             .service(delete_search_context);
+
         app
     })
     .bind(("127.0.0.1", 8080))?
