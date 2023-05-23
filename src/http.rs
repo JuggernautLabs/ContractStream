@@ -4,7 +4,10 @@
 // pending_job_actions = (reject, proposal)
 // request_proposal(job_id)
 
+use actix_cors::Cors;
+use actix_web::{dev::Service, http::header}; // Add this line
 use anyhow::anyhow;
+use futures::future::try_join_all;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -21,14 +24,16 @@ use actix_web::{
     web::{self, Data, Form, Json},
     App, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError,
 };
-use log::info;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::db::{Database, Job, VerifiedUser};
 use crate::db_utils::FetchId;
+use crate::{
+    db::{Database, Job, Resume, SearchContext, VerifiedUser},
+    db_utils::Id,
+};
 
 static PY_URL: &str = "http://0.0.0.0:8081";
 
@@ -84,7 +89,7 @@ enum AppError {
     SignupError(anyhow::Error),
     #[error("user not found")]
     UserNotFound,
-    #[error("database error")]
+    #[error("database error {0}")]
     DatabaseError(#[from] anyhow::Error),
     #[error("invalid session")]
     InvalidSession,
@@ -94,17 +99,29 @@ enum AppError {
     InternalError(anyhow::Error),
 }
 
-impl ResponseError for AppError {}
-
+impl ResponseError for AppError {
+    fn status_code(&self) -> StatusCode {
+        match self {
+            AppError::LoginError(_) => StatusCode::UNAUTHORIZED,
+            AppError::SignupError(_) => StatusCode::BAD_REQUEST,
+            AppError::UserNotFound => StatusCode::NOT_FOUND,
+            AppError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            AppError::InvalidSession => StatusCode::UNAUTHORIZED,
+            AppError::InvalidShape(_) => StatusCode::BAD_REQUEST,
+            AppError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
 #[derive(Deserialize)]
 struct LoginForm {
     username: String,
     password: String,
 }
+
 #[post("/login")]
 async fn login(
     _req: HttpRequest,
-    login_form: Form<LoginForm>,
+    login_form: Json<LoginForm>,
     data: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
     let user = data
@@ -113,7 +130,9 @@ async fn login(
         .await
         .map_err(AppError::LoginError)?;
     let session_cookie = LoginCookie::new(user, Duration::hours(1));
-    let mut res = HttpResponse::Ok().body("login successful".to_string());
+    let mut res = HttpResponse::Ok()
+        .append_header(("credentials", "include"))
+        .body("login successful".to_string());
 
     res.add_cookie(&(&session_cookie).into()).unwrap();
 
@@ -127,7 +146,7 @@ async fn login(
 
 #[post("/signup")]
 async fn signup(
-    login_form: Form<LoginForm>,
+    login_form: Json<LoginForm>,
     data: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
     let user = data
@@ -164,7 +183,7 @@ async fn pending_jobs(
     Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
 }
 
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 
 #[derive(Deserialize)]
 struct ClassifyResponse {
@@ -294,7 +313,7 @@ async fn reject_job(
     return Ok("");
 }
 
-#[derive(Deserialize, TS)]
+#[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]
 struct SearchContextReq {
     resume_text: String,
@@ -314,40 +333,93 @@ async fn post_search_context(
 
     let database = &state.database;
     let resume = database.save_resume(user, context.resume_text).await?;
-
-    let _search_context = database
+    let search_context = database
         .insert_search_context(user, resume.resume_id, context.keywords)
         .await
         .map_err(AppError::DatabaseError)?;
 
-    Ok(HttpResponse::Ok())
+    let res = SearchContextRes::try_from_search_context(search_context, database).await?;
+    Ok(HttpResponse::Ok().body(serde_json::to_string(&res).unwrap()))
 }
 
+#[derive(Serialize, TS)]
+#[ts(export)]
+struct SearchContextRes {
+    #[serde(flatten)]
+    search_context: SearchContextReq,
+    context_id: <SearchContext as FetchId>::Id,
+}
+
+impl SearchContextRes {
+    async fn try_from_search_context(
+        context: SearchContext,
+        database: &Database,
+    ) -> Result<Self, AppError> {
+        let resume = match context.resume_id.clone() {
+            None => Ok::<_, anyhow::Error>(None),
+            Some(resume_id) => {
+                let resume = resume_id
+                    .fetch(database.pool.clone())
+                    .await
+                    .map_err(|e| AppError::InternalError(anyhow!("Unable to fetch resume",)))?;
+                Ok(Some(resume))
+            }
+        };
+        let search_context = match resume? {
+            None => SearchContextReq {
+                resume_text: "".into(),
+                keywords: context.keywords.clone(),
+            },
+            Some(resume) => {
+                let resume_text = resume.resume_text;
+                SearchContextReq {
+                    resume_text,
+                    keywords: context.keywords.clone(),
+                }
+            }
+        };
+        log::debug!("matched");
+        log::debug!("{search_context:?}");
+        Ok::<_, AppError>(SearchContextRes {
+            search_context,
+            context_id: context.context_id,
+        })
+    }
+}
 #[get("/search_context")]
 async fn get_search_context(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
+    log::debug!("get_search_context");
     let login_cookie = state.verify_user(req)?;
 
     let user = &login_cookie.user;
 
     let database = &state.database;
 
-    let search_contexts = database
+    let contexts = database
         .get_search_contexts_by_user(user)
         .await
         .map_err(AppError::DatabaseError)?;
 
-    Ok(HttpResponse::Ok().body(serde_json::to_string(&search_contexts).unwrap()))
+    let future_reqs = contexts
+        .iter()
+        .map(|context| SearchContextRes::try_from_search_context(context.clone(), database));
+
+    let search_contexts = try_join_all(future_reqs).await?;
+    let json_string = serde_json::to_string(&search_contexts).unwrap();
+    log::debug!("{json_string}");
+    Ok(HttpResponse::Ok().body(json_string))
 }
 
-#[delete("/search_context/{context_id}")]
+#[delete("/search_context")]
 async fn delete_search_context(
     req: HttpRequest,
-    context_id: Path<i32>,
+    context_id: Json<i32>,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
+    log::debug!("delete");
     let login_cookie = state.verify_user(req)?;
 
     let user = &login_cookie.user;
@@ -357,7 +429,7 @@ async fn delete_search_context(
     let _search_context = database
         .remove_search_context(user, context_id.into_inner())
         .await
-        .map_err(AppError::DatabaseError)?;
+        .map_err(|e|AppError::DatabaseError(e))?;
 
     Ok(HttpResponse::Ok())
 }
@@ -386,13 +458,12 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
     };
     let app_data = Arc::new(app_data);
 
-    //std::env::set_var("RUST_LOG", "actix_web=info");
+    std::env::set_var("RUST_LOG", "info,debug,actix_web=info,debug");
     env_logger::init();
 
     HttpServer::new(move || {
         let app = App::new()
-            .wrap(Logger::default())
-            .wrap(Logger::new("%a %{User-Agent}i"))
+            .wrap(Cors::permissive())
             .app_data(web::Data::new(app_data.clone()))
             .service(login)
             .service(check_login)
@@ -403,8 +474,10 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
             .service(accept_job)
             .service(reject_job)
             .service(post_search_context)
+            .service(get_search_context)
             // .service(active_searches)
-            .service(delete_search_context);
+            .service(delete_search_context)
+            .wrap(Logger::new("%a %{User-Agent}i"));
 
         app
     })
@@ -414,6 +487,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+// TODO: don't drop tables for testing, super risky
 #[cfg(test)]
 mod tests {
     use crate::db::Database;

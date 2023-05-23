@@ -1,5 +1,6 @@
 use std::fmt::Debug;
 
+use anyhow::bail;
 // use crate::models::*;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -30,3 +31,4 @@ impl<Struct: FetchId + Clone> Index<Struct> {
         self.0.clone()
     }
 }
+

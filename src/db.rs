@@ -30,7 +30,7 @@ pub struct VerifiedUser(pub User);
 
 impl VerifiedUser {
     fn id(&self) -> Id<User> {
-        return self.id();
+        return self.0.user_id;
     }
 }
 impl PartialEq for VerifiedUser {
@@ -709,18 +709,18 @@ impl Database {
         let mut conn = self.pool.acquire().await?;
 
         let user_id = user.id();
-        let record = sqlx::query!(
+        let _record = sqlx::query!(
             "UPDATE SearchContexts
             SET deleted = true
             WHERE context_id = $1
             AND user_id = $2
+            RETURNING context_id
             ",
             context_id,
             user_id,
         )
         .fetch_one(&mut conn)
         .await?;
-
         Ok(())
     }
     pub async fn get_search_contexts_by_user(
@@ -729,7 +729,7 @@ impl Database {
     ) -> Result<Vec<SearchContext>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
         let career_info_rows = sqlx::query!(
-            "SELECT context_id, resume_id, user_id, keywords FROM SearchContexts WHERE user_id = $1",
+            "SELECT context_id, resume_id, user_id, keywords FROM SearchContexts WHERE user_id = $1 AND deleted = false",
             user_id.id()
         )
         .fetch_all(&mut conn)
@@ -774,6 +774,8 @@ impl Database {
         Ok(())
     }
 
+
+    // unsafe
     pub async fn drop_non_user_tables(&self) -> Result<(), sqlx::Error> {
         let mut pool = self.pool.acquire().await?;
         sqlx::query!("DROP TABLE IF EXISTS DecidedJobs;")
