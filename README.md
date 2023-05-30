@@ -1,13 +1,11 @@
 # Contract Stream - The Job Searching Platform
 
-Save time when you're searching for a new contract. Contract Stream keeps you updated with the most relevant job posts day to day, allowing to you keep track of market trends, and allowing you to tailor your job search specifically to you. One platform for every platform. 
+Save time when you're searching for a new contract. Contract Stream keeps you updated with the most relevant job posts day to day, allowing to you keep track of market trends, and giving you the tools to tailor your job search specifically to you. One platform for every platform. 
 
 
 ## Usage
 
-This project is domain specific, and will likely not be useful to most people without changes. However it can be used as a quickstart example for a Postgresql + HTTP Rust project. 
-
-The code exposed here doesn't do any of the interesting machine learning or ai, this is simply a database and HTTP api.
+We are currently working on a desktop application to enable you to scrape the lastest job posts from any website. Stay updated with the latest information here!
 
 ## Features
 
@@ -21,8 +19,8 @@ The code exposed here doesn't do any of the interesting machine learning or ai, 
 
 #### Future features
 
-- Automated job application processing; automatically fill in basic infomation onto job application sites, no more manually uploading your resume to 5 different applications.
-- More data sources for jobs
+- Automated job application processing; automatically fill in basic infomation within job application sites, no more manually uploading your resume to 5 different applications.
+- More data sources for jobs (currently only one platform)
 - Access to a blog section for career advice, industry trends, and other helpful resources.
 - A forum for users to engage in discussions and share experiences with fellow job seekers.
 
