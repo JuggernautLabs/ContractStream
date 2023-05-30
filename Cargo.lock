@@ -392,6 +392,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "contract_broker"
+version = "0.1.0"
+dependencies = [
+ "actix-cors",
+ "actix-web",
+ "anyhow",
+ "async-trait",
+ "bigdecimal",
+ "derive_builder",
+ "dotenv",
+ "env_logger",
+ "futures",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "ts-rs",
+ "typed-builder",
+ "uuid",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -831,31 +856,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
-]
-
-[[package]]
-name = "gptftw-back"
-version = "0.1.0"
-dependencies = [
- "actix-cors",
- "actix-web",
- "anyhow",
- "async-trait",
- "bigdecimal",
- "derive_builder",
- "dotenv",
- "env_logger",
- "futures",
- "log",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "thiserror",
- "tokio",
- "ts-rs",
- "typed-builder",
- "uuid",
 ]
 
 [[package]]

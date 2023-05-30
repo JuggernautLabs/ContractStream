@@ -26,6 +26,6 @@ async fn main() -> Result<(), anyhow::Error> {
         .await?;
     let database = Database::new(pool);
     println!("Starting server");
-    http::serve(database).await?;
+    http::serve(("127.0.0.1", 8080), database).await?;
     Ok(())
 }

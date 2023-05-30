@@ -429,7 +429,7 @@ async fn delete_search_context(
     let _search_context = database
         .remove_search_context(user, context_id.into_inner())
         .await
-        .map_err(|e|AppError::DatabaseError(e))?;
+        .map_err(|e| AppError::DatabaseError(e))?;
 
     Ok(HttpResponse::Ok())
 }
@@ -451,7 +451,7 @@ async fn delete_search_context(
 
 // #[get("create_search")]
 
-pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
+pub async fn serve(addr: (&str, u16), database: Database) -> Result<(), anyhow::Error> {
     let app_data = AppState {
         database,
         login_cache: Mutex::new(BTreeMap::new()),
@@ -481,7 +481,7 @@ pub async fn serve(database: Database) -> Result<(), anyhow::Error> {
 
         app
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(addr)?
     .run()
     .await?;
     Ok(())
