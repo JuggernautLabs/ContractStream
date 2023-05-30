@@ -1,13 +1,9 @@
-mod db;
-mod db_utils;
-mod http;
-
 use dotenv::dotenv;
 
 use sqlx::postgres::PgPoolOptions;
 use std::env;
 
-use crate::db::Database;
+use contract_broker::{db::Database, http};
 
 // pub static MIGRATOR: Migrator = sqlx::migrate!(); // defaults to "./migrations"
 // use sqlx::mysql::MySqlPoolOptions;
