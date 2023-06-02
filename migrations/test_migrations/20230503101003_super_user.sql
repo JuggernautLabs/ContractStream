@@ -6,7 +6,5 @@ BEGIN
 END
 $$;
 
-ALTER ROLE super SUPERUSER;
-
 SELECT insert_user('Jay', 'isPleb')
 
