@@ -6,6 +6,9 @@
 
 use actix_cors::Cors;
 use actix_web::{dev::Service, http::header}; // Add this line
+use actix_multipart::Multipart;
+//use tokio_stream::stream_ext::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use anyhow::anyhow;
 use futures::future::try_join_all;
 use std::{
@@ -316,7 +319,6 @@ async fn reject_job(
 #[derive(Debug, Deserialize, Serialize, TS)]
 #[ts(export)]
 struct SearchContextReq {
-    resume_text: String,
     keywords: Vec<String>,
 }
 
@@ -332,9 +334,8 @@ async fn post_search_context(
     let context = context.into_inner();
 
     let database = &state.database;
-    let resume = database.save_resume(user, context.resume_text).await?;
     let search_context = database
-        .insert_search_context(user, resume.resume_id, context.keywords)
+        .insert_search_context(user, context.keywords)
         .await
         .map_err(AppError::DatabaseError)?;
 
@@ -355,31 +356,10 @@ impl SearchContextRes {
         context: SearchContext,
         database: &Database,
     ) -> Result<Self, AppError> {
-        let resume = match context.resume_id.clone() {
-            None => Ok::<_, anyhow::Error>(None),
-            Some(resume_id) => {
-                let resume = resume_id
-                    .fetch(database.pool.clone())
-                    .await
-                    .map_err(|e| AppError::InternalError(anyhow!("Unable to fetch resume",)))?;
-                Ok(Some(resume))
-            }
+        let search_context = SearchContextReq {
+            keywords: context.keywords.clone(),
         };
-        let search_context = match resume? {
-            None => SearchContextReq {
-                resume_text: "".into(),
-                keywords: context.keywords.clone(),
-            },
-            Some(resume) => {
-                let resume_text = resume.resume_text;
-                SearchContextReq {
-                    resume_text,
-                    keywords: context.keywords.clone(),
-                }
-            }
-        };
-        log::debug!("matched");
-        log::debug!("{search_context:?}");
+
         Ok::<_, AppError>(SearchContextRes {
             search_context,
             context_id: context.context_id,
@@ -393,9 +373,7 @@ async fn get_search_context(
 ) -> Result<impl Responder, AppError> {
     log::debug!("get_search_context");
     let login_cookie = state.verify_user(req)?;
-
     let user = &login_cookie.user;
-
     let database = &state.database;
 
     let contexts = database
@@ -411,6 +389,40 @@ async fn get_search_context(
     let json_string = serde_json::to_string(&search_contexts).unwrap();
     log::debug!("{json_string}");
     Ok(HttpResponse::Ok().body(json_string))
+}
+
+#[post("/upload_resume")]
+async fn upload_resume(
+    req: HttpRequest,
+    mut payload: Multipart,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req)?;
+    let user = &login_cookie.user;
+    let db = &state.database;
+
+    while let Ok(Some(mut field)) = payload.try_next().await {
+        let content_disposition = field
+            .content_disposition();
+
+        let filename = content_disposition
+            .get_filename()
+            .ok_or_else(|| AppError::InternalError(actix_web::error::ParseError::Incomplete.into()))?;
+
+        if filename.ends_with(".pdf") {
+            let mut data = Vec::new();
+            while let Some(chunk) = field.next().await {
+                let data_chunk = chunk.map_err(|e| AppError::InternalError(anyhow!("Failed to parse pdf file".to_string())))?;
+                data.extend_from_slice(&data_chunk);
+            }
+
+            let text = pdf_extract::extract_text_from_mem(&data)
+                .map_err(|e| AppError::InternalError(e.into()))?;
+
+            db.save_resume(user, Some(data), text).await?;
+        }
+    }
+    Ok("")
 }
 
 #[delete("/search_context")]

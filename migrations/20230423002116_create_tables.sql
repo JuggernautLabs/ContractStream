@@ -52,15 +52,14 @@ CREATE TABLE IF NOT EXISTS Resumes (
     resume_id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES Users(user_id) NOT NULL,
     resume_text TEXT NOT NULL,
+    pdf BYTEA,
     deleted BOOLEAN NOT NULL DEFAULT FALSE
-
 );
 
 -- Resume PDF
 
 CREATE TABLE IF NOT EXISTS SearchContexts (
     context_id SERIAL PRIMARY KEY,
-    resume_id INTEGER REFERENCES Resumes(resume_id),
     keywords varchar(255)[] default ARRAY[]::varchar[] NOT NULL,
     user_id INTEGER REFERENCES Users(user_id) NOT NULL,
     deleted BOOLEAN NOT NULL DEFAULT FALSE

@@ -64,6 +64,7 @@ pub struct Resume {
     pub resume_id: i32,
     pub user_id: Index<User>,
     pub resume_text: String,
+    pub raw: Option<Vec<u8>>,
 }
 
 #[async_trait]
@@ -82,6 +83,7 @@ impl FetchId for Resume {
             resume_id: id.clone(),
             user_id: Index::new(row.user_id),
             resume_text: row.resume_text,
+            raw: row.pdf,
         })
     }
 }
@@ -90,7 +92,6 @@ impl FetchId for Resume {
 #[ts(export)]
 pub struct SearchContext {
     pub context_id: i32,
-    pub resume_id: Option<Index<Resume>>,
     pub keywords: Vec<String>,
     pub user_id: Index<User>,
 }
@@ -109,7 +110,6 @@ impl FetchId for SearchContext {
         .await?;
         Ok(SearchContext {
             context_id: row.context_id,
-            resume_id: row.resume_id.map(|rid| Index::<Resume>::new(rid)),
             keywords: row.keywords,
             user_id: Index::<User>::new(row.user_id),
         })
@@ -606,16 +606,18 @@ impl Database {
     pub async fn save_resume(
         &self,
         user: &VerifiedUser,
+        raw: Option<Vec<u8>>,
         resume_text: String,
     ) -> Result<Resume, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
         let resume_id = sqlx::query!(
-            "INSERT INTO Resumes (user_id, resume_text)
-            VALUES ($1, $2)
+            "INSERT INTO Resumes (user_id, resume_text, pdf)
+            VALUES ($1, $2, $3)
             RETURNING resume_id
             ",
             user.id(),
-            resume_text
+            resume_text,
+            raw,
         )
         .fetch_one(&mut conn)
         .await?
@@ -624,6 +626,7 @@ impl Database {
         Ok(Resume {
             resume_id,
             user_id: Index::new(user.id()),
+            raw,
             resume_text,
         })
     }
@@ -676,7 +679,6 @@ impl Database {
     pub async fn insert_search_context(
         &self,
         user: &VerifiedUser,
-        resume_id: Id<Resume>,
         keywords: Vec<String>,
     ) -> Result<SearchContext, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
@@ -684,10 +686,9 @@ impl Database {
 
         let user_id = user.id();
         let record = sqlx::query!(
-            "INSERT INTO SearchContexts (resume_id, keywords, user_id)
-            VALUES ($1, $2, $3)
+            "INSERT INTO SearchContexts (keywords, user_id)
+            VALUES ($1, $2)
             RETURNING context_id",
-            resume_id,
             keyword_arr,
             user_id
         )
@@ -696,9 +697,8 @@ impl Database {
 
         Ok(SearchContext {
             context_id: record.context_id,
-            resume_id: Some(Index::new(resume_id)),
             keywords,
-            user_id: Index::new(resume_id),
+            user_id: Index::new(user_id),
         })
     }
     pub async fn remove_search_context(
@@ -729,7 +729,7 @@ impl Database {
     ) -> Result<Vec<SearchContext>, anyhow::Error> {
         let mut conn = self.pool.acquire().await?;
         let career_info_rows = sqlx::query!(
-            "SELECT context_id, resume_id, user_id, keywords FROM SearchContexts WHERE user_id = $1 AND deleted = false",
+            "SELECT context_id, user_id, keywords FROM SearchContexts WHERE user_id = $1 AND deleted = false",
             user_id.id()
         )
         .fetch_all(&mut conn)
@@ -738,10 +738,8 @@ impl Database {
         let result = career_info_rows
             .into_iter()
             .map(|row| {
-                let resume_id = row.resume_id.map(|id| Index::<Resume>::new(id));
                 SearchContext {
                     context_id: row.context_id,
-                    resume_id,
                     keywords: row.keywords,
                     user_id: Index::new(row.user_id),
                 }
