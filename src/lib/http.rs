@@ -234,6 +234,26 @@ async fn next_pending_job(
     Err(AppError::InternalError(anyhow!("No pending jobs")))
 }
 
+#[post("/scrape_for_user")]
+async fn scrape_for_user(
+    req: HttpRequest,
+    state: Data<Arc<AppState>>,
+) -> Result<impl Responder, AppError> {
+    let login_cookie = state.verify_user(req.clone())?;
+    let user = &login_cookie.user;
+
+    let client = Client::new();
+
+    client
+        .post(format!("{}/scrape_for_user", PY_URL))
+        .query(&[("user_id", user.0.user_id)])
+        .send()
+        .await
+        .map_err(|e| AppError::InternalError(e.into()))?;
+
+    Ok("")
+}
+
 // this needs to validate that a given job has been assigned to a particular user
 // or we say screw it, generate a job for any job you want
 // it's their money after all
@@ -487,6 +507,7 @@ pub async fn serve(addr: (&str, u16), database: Database) -> Result<(), anyhow::
             .service(reject_job)
             .service(post_search_context)
             .service(get_search_context)
+            .service(scrape_for_user)
             // .service(active_searches)
             .service(delete_search_context)
             .wrap(Logger::new("%a %{User-Agent}i"));
