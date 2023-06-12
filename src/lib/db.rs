@@ -13,7 +13,7 @@ use typed_builder::TypedBuilder;
 
 #[derive(TS)]
 #[ts(export)]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct User {
     pub user_id: i32,
     pub username: String,
@@ -30,7 +30,7 @@ pub struct VerifiedUser(pub User);
 
 impl VerifiedUser {
     fn id(&self) -> Id<User> {
-        return self.0.user_id;
+        self.0.user_id
     }
 }
 impl PartialEq for VerifiedUser {
@@ -80,7 +80,7 @@ impl FetchId for Resume {
         .fetch_one(&mut conn)
         .await?;
         Ok(Resume {
-            resume_id: id.clone(),
+            resume_id: *id,
             user_id: Index::new(row.user_id),
             resume_text: row.resume_text,
             raw: row.pdf,

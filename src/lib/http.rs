@@ -6,7 +6,7 @@
 
 use actix_cors::Cors;
 use actix_multipart::Multipart;
-use actix_web::{dev::Service, http::header}; // Add this line
+// Add this line
 //use tokio_stream::stream_ext::StreamExt;
 use anyhow::anyhow;
 use futures::future::try_join_all;
@@ -23,8 +23,7 @@ use actix_web::{
     delete, get,
     middleware::Logger,
     post,
-    web::Path,
-    web::{self, Data, Form, Json},
+    web::{self, Data, Json},
     App, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError,
 };
 use serde::{Deserialize, Serialize};
@@ -32,13 +31,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::db::{Database, Job, SearchContext, VerifiedUser};
 use crate::db_utils::FetchId;
-use crate::{
-    db::{Database, Job, Resume, SearchContext, VerifiedUser},
-    db_utils::Id,
-};
 
-static PY_URL: &str = "http://0.0.0.0:8081";
+static PY_URL: &str = "http://localhost:8081";
 
 #[derive(PartialEq)]
 struct LoginCookie {
@@ -59,9 +55,9 @@ impl LoginCookie {
     }
 }
 
-impl<'a> Into<Cookie<'a>> for &LoginCookie {
-    fn into(self) -> Cookie<'a> {
-        Cookie::build("session_id", self.cookie_id.to_string()).finish()
+impl<'a> From<&LoginCookie> for Cookie<'a> {
+    fn from(cookie: &LoginCookie) -> Self {
+        Cookie::build("session_id", cookie.cookie_id.to_string()).finish()
     }
 }
 
@@ -90,8 +86,6 @@ enum AppError {
     LoginError(anyhow::Error),
     #[error("signup failed")]
     SignupError(anyhow::Error),
-    #[error("user not found")]
-    UserNotFound,
     #[error("database error {0}")]
     DatabaseError(#[from] anyhow::Error),
     #[error("invalid session")]
@@ -107,7 +101,6 @@ impl ResponseError for AppError {
         match self {
             AppError::LoginError(_) => StatusCode::UNAUTHORIZED,
             AppError::SignupError(_) => StatusCode::BAD_REQUEST,
-            AppError::UserNotFound => StatusCode::NOT_FOUND,
             AppError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             AppError::InvalidSession => StatusCode::UNAUTHORIZED,
             AppError::InvalidShape(_) => StatusCode::BAD_REQUEST,
@@ -165,7 +158,7 @@ async fn check_login(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req)?;
+    let _login_cookie = state.verify_user(req)?;
     Ok(HttpResponse::Ok())
 }
 
@@ -209,7 +202,7 @@ async fn next_pending_job(
     let pending_jobs1 = database
         .get_user_pending_jobs(user)
         .await
-        .map_err(|e| AppError::DatabaseError(e))?;
+        .map_err(AppError::DatabaseError)?;
 
     let client = Client::new();
     for job in pending_jobs1 {
@@ -283,7 +276,7 @@ async fn generate_proposal(
         .await
         .map_err(|e| AppError::InternalError(e.into()))?;
 
-    return Ok(web::Json(res_json.proposal));
+    Ok(web::Json(res_json.proposal))
 }
 
 #[derive(Deserialize)]
@@ -310,7 +303,7 @@ async fn accept_job(
         .await
         .map_err(|e| AppError::DatabaseError(e.into()))?;
 
-    return Ok("");
+    Ok("")
 }
 
 #[post("/reject_job")]
@@ -333,7 +326,7 @@ async fn reject_job(
         .await
         .map_err(|e| AppError::DatabaseError(e.into()))?;
 
-    return Ok("");
+    Ok("")
 }
 
 #[derive(Debug, Deserialize, Serialize, TS)]
@@ -374,7 +367,7 @@ struct SearchContextRes {
 impl SearchContextRes {
     async fn try_from_search_context(
         context: SearchContext,
-        database: &Database,
+        _database: &Database,
     ) -> Result<Self, AppError> {
         let search_context = SearchContextReq {
             keywords: context.keywords.clone(),
@@ -431,7 +424,7 @@ async fn upload_resume(
         if filename.ends_with(".pdf") {
             let mut data = Vec::new();
             while let Some(chunk) = field.next().await {
-                let data_chunk = chunk.map_err(|e| {
+                let data_chunk = chunk.map_err(|_e| {
                     AppError::InternalError(anyhow!("Failed to parse pdf file".to_string()))
                 })?;
                 data.extend_from_slice(&data_chunk);
@@ -459,10 +452,10 @@ async fn delete_search_context(
 
     let database = &state.database;
 
-    let _search_context = database
+    database
         .remove_search_context(user, context_id.into_inner())
         .await
-        .map_err(|e| AppError::DatabaseError(e))?;
+        .map_err(AppError::DatabaseError)?;
 
     Ok(HttpResponse::Ok())
 }
@@ -495,7 +488,7 @@ pub async fn serve(addr: (&str, u16), database: Database) -> Result<(), anyhow::
     env_logger::init();
 
     HttpServer::new(move || {
-        let app = App::new()
+        App::new()
             .wrap(Cors::permissive())
             .app_data(web::Data::new(app_data.clone()))
             .service(login)
@@ -511,9 +504,7 @@ pub async fn serve(addr: (&str, u16), database: Database) -> Result<(), anyhow::
             .service(scrape_for_user)
             // .service(active_searches)
             .service(delete_search_context)
-            .wrap(Logger::new("%a %{User-Agent}i"));
-
-        app
+            .wrap(Logger::new("%a %{User-Agent}i"))
     })
     .bind(addr)?
     .run()
@@ -526,7 +517,6 @@ pub async fn serve(addr: (&str, u16), database: Database) -> Result<(), anyhow::
 mod tests {
     use crate::db::Database;
     use sqlx::postgres::PgPoolOptions;
-    use std::env;
 
     async fn db() -> Result<Database, anyhow::Error> {
         /*
