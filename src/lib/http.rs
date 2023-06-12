@@ -5,12 +5,12 @@
 // request_proposal(job_id)
 
 use actix_cors::Cors;
-use actix_web::{dev::Service, http::header}; // Add this line
 use actix_multipart::Multipart;
+use actix_web::{dev::Service, http::header}; // Add this line
 //use tokio_stream::stream_ext::StreamExt;
-use futures::{StreamExt, TryStreamExt};
 use anyhow::anyhow;
 use futures::future::try_join_all;
+use futures::{StreamExt, TryStreamExt};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
@@ -422,17 +422,18 @@ async fn upload_resume(
     let db = &state.database;
 
     while let Ok(Some(mut field)) = payload.try_next().await {
-        let content_disposition = field
-            .content_disposition();
+        let content_disposition = field.content_disposition();
 
-        let filename = content_disposition
-            .get_filename()
-            .ok_or_else(|| AppError::InternalError(actix_web::error::ParseError::Incomplete.into()))?;
+        let filename = content_disposition.get_filename().ok_or_else(|| {
+            AppError::InternalError(actix_web::error::ParseError::Incomplete.into())
+        })?;
 
         if filename.ends_with(".pdf") {
             let mut data = Vec::new();
             while let Some(chunk) = field.next().await {
-                let data_chunk = chunk.map_err(|e| AppError::InternalError(anyhow!("Failed to parse pdf file".to_string())))?;
+                let data_chunk = chunk.map_err(|e| {
+                    AppError::InternalError(anyhow!("Failed to parse pdf file".to_string()))
+                })?;
                 data.extend_from_slice(&data_chunk);
             }
 

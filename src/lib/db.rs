@@ -737,12 +737,10 @@ impl Database {
 
         let result = career_info_rows
             .into_iter()
-            .map(|row| {
-                SearchContext {
-                    context_id: row.context_id,
-                    keywords: row.keywords,
-                    user_id: Index::new(row.user_id),
-                }
+            .map(|row| SearchContext {
+                context_id: row.context_id,
+                keywords: row.keywords,
+                user_id: Index::new(row.user_id),
             })
             .collect::<Vec<SearchContext>>();
 
@@ -771,7 +769,6 @@ impl Database {
         self.remove_pending_job(user, job_id).await?;
         Ok(())
     }
-
 
     // unsafe
     pub async fn drop_non_user_tables(&self) -> Result<(), sqlx::Error> {
