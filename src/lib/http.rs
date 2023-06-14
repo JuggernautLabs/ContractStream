@@ -4,6 +4,8 @@
 // pending_job_actions = (reject, proposal)
 // request_proposal(job_id)
 
+use std::sync::Arc;
+
 use actix_cors::Cors;
 use actix_multipart::Multipart;
 // Add this line

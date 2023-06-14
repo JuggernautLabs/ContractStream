@@ -61,16 +61,17 @@ impl ResponseError for AppError {
     }
 }
 
+/// users only ever have a single session
+/// If a user is logging in we check `username_session` to see if the user has already in `login_cache`
+/// if not, the user is added to username_session and login_cache
+/// a new cookie is only created if the user is not already cached
+/// this prevents the size of AppState from blowing up by single users logging in multiple times
 pub struct AppState {
     pub database: Database,
     username_session: DashMap<Username, SessionId>,
-
     login_cache: DashMap<SessionId, Arc<LoginCookie>>,
 }
 
-/// Keeps track of a user's session with double indirection
-/// If a user is logging in we check `username_session` to see if the user has already logged in
-/// if not, the user is added to
 impl AppState {
     pub async fn is_logged_in(&self, user: &VerifiedUser) -> Option<SessionId> {
         let res = self
