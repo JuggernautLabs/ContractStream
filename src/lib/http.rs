@@ -9,105 +9,28 @@ use actix_multipart::Multipart;
 // Add this line
 //use tokio_stream::stream_ext::StreamExt;
 use anyhow::anyhow;
+
 use futures::future::try_join_all;
 use futures::{StreamExt, TryStreamExt};
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+
 use ts_rs::TS;
 
 use actix_web::{
-    cookie::{time::Duration, Cookie},
+    cookie::Cookie,
     delete, get,
     middleware::Logger,
     post,
     web::{self, Data, Json},
-    App, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError,
+    App, HttpRequest, HttpResponse, HttpServer, Responder,
 };
 use serde::{Deserialize, Serialize};
 
-use thiserror::Error;
-use uuid::Uuid;
-
-use crate::db::{Database, Job, SearchContext, VerifiedUser};
+use crate::appstate::{AppError, AppState};
+use crate::db::{Database, Job, SearchContext};
 use crate::db_utils::FetchId;
 
 static PY_URL: &str = "http://localhost:8081";
 
-#[derive(PartialEq)]
-struct LoginCookie {
-    cookie_id: Uuid,
-    death_date: Instant,
-    user: VerifiedUser,
-}
-
-impl LoginCookie {
-    pub fn new(user: VerifiedUser, ttl: Duration) -> Self {
-        let uuid = Uuid::new_v4();
-        let death_date = Instant::now() + ttl;
-        Self {
-            cookie_id: uuid,
-            death_date,
-            user,
-        }
-    }
-}
-
-impl<'a> From<&LoginCookie> for Cookie<'a> {
-    fn from(cookie: &LoginCookie) -> Self {
-        Cookie::build("session_id", cookie.cookie_id.to_string()).finish()
-    }
-}
-
-struct AppState {
-    database: Database,
-    login_cache: Mutex<BTreeMap<String, Arc<LoginCookie>>>,
-}
-
-impl AppState {
-    pub fn verify_user(&self, req: HttpRequest) -> Result<Arc<LoginCookie>, AppError> {
-        let cookie = req.cookie("session_id").ok_or(AppError::InvalidSession)?;
-        let session_id = cookie.value();
-        let login_cache = self.login_cache.lock().unwrap();
-        let res: Result<Arc<LoginCookie>, AppError> = login_cache
-            .get(session_id)
-            .cloned()
-            .ok_or(AppError::InvalidSession);
-
-        res
-    }
-}
-
-#[derive(Error, Debug)]
-enum AppError {
-    #[error("login failed")]
-    LoginError(anyhow::Error),
-    #[error("signup failed")]
-    SignupError(anyhow::Error),
-    #[error("database error {0}")]
-    DatabaseError(#[from] anyhow::Error),
-    #[error("invalid session")]
-    InvalidSession,
-    #[error("input deserialization failed `{0}`")]
-    InvalidShape(String),
-    #[error("Internal error `{0}`")]
-    InternalError(anyhow::Error),
-}
-
-impl ResponseError for AppError {
-    fn status_code(&self) -> StatusCode {
-        match self {
-            AppError::LoginError(_) => StatusCode::UNAUTHORIZED,
-            AppError::SignupError(_) => StatusCode::BAD_REQUEST,
-            AppError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            AppError::InvalidSession => StatusCode::UNAUTHORIZED,
-            AppError::InvalidShape(_) => StatusCode::BAD_REQUEST,
-            AppError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    }
-}
 #[derive(Deserialize)]
 struct LoginForm {
     username: String,
@@ -118,24 +41,21 @@ struct LoginForm {
 async fn login(
     _req: HttpRequest,
     login_form: Json<LoginForm>,
-    data: Data<Arc<AppState>>,
+    state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let user = data
+    let user = state
         .database
         .get_user(login_form.username.clone(), login_form.password.clone())
         .await
         .map_err(AppError::LoginError)?;
-    let session_cookie = LoginCookie::new(user, Duration::hours(1));
+
     let mut res = HttpResponse::Ok()
         .append_header(("credentials", "include"))
         .body("login successful".to_string());
 
-    res.add_cookie(&(&session_cookie).into()).unwrap();
-
-    data.login_cache.lock().unwrap().insert(
-        session_cookie.cookie_id.to_string(),
-        Arc::new(session_cookie),
-    );
+    let login_cookie = state.login(user).await?;
+    let cookie = Cookie::build("session_id", login_cookie.cookie_id.to_string()).finish();
+    res.add_cookie(&cookie).unwrap();
 
     Ok(res)
 }
@@ -158,7 +78,7 @@ async fn check_login(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let _login_cookie = state.verify_user(req)?;
+    let _login_cookie = state.verify_user(req).await?;
     Ok(HttpResponse::Ok())
 }
 
@@ -167,7 +87,7 @@ async fn pending_jobs(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req)?;
+    let login_cookie = state.verify_user(req).await?;
     let database = &state.database;
     let user = &login_cookie.user;
 
@@ -179,7 +99,7 @@ async fn pending_jobs(
     Ok(HttpResponse::Ok().body(serde_json::to_string(&pending_jobs).unwrap()))
 }
 
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 
 #[derive(Deserialize)]
 struct ClassifyResponse {
@@ -196,7 +116,7 @@ async fn next_pending_job(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req)?;
+    let login_cookie = state.verify_user(req).await?;
     let database = &state.database;
     let user = &login_cookie.user;
     let pending_jobs1 = database
@@ -232,7 +152,7 @@ async fn scrape_for_user(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req.clone())?;
+    let login_cookie = state.verify_user(req.clone()).await?;
     let user = &login_cookie.user;
 
     let client = Client::new();
@@ -255,7 +175,7 @@ async fn generate_proposal(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req.clone())?;
+    let login_cookie = state.verify_user(req.clone()).await?;
     let user = &login_cookie.user;
     use actix_web::web;
     let params = web::Query::<JobIdParam>::from_query(req.query_string())
@@ -288,7 +208,7 @@ async fn accept_job(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req.clone())?;
+    let login_cookie = state.verify_user(req.clone()).await?;
     let user = &login_cookie.user;
     let db = &state.database;
     let params = web::Query::<JobIdParam>::from_query(req.query_string())
@@ -311,7 +231,7 @@ async fn reject_job(
     req: HttpRequest,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req.clone())?;
+    let login_cookie = state.verify_user(req.clone()).await?;
     let user = &login_cookie.user;
     let db = &state.database;
     let params = web::Query::<JobIdParam>::from_query(req.query_string())
@@ -341,7 +261,7 @@ async fn post_search_context(
     context: Json<SearchContextReq>,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req)?;
+    let login_cookie = state.verify_user(req).await?;
 
     let user = &login_cookie.user;
     let context = context.into_inner();
@@ -385,7 +305,7 @@ async fn get_search_context(
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
     log::debug!("get_search_context");
-    let login_cookie = state.verify_user(req)?;
+    let login_cookie = state.verify_user(req).await?;
     let user = &login_cookie.user;
     let database = &state.database;
 
@@ -410,7 +330,7 @@ async fn upload_resume(
     mut payload: Multipart,
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
-    let login_cookie = state.verify_user(req)?;
+    let login_cookie = state.verify_user(req).await?;
     let user = &login_cookie.user;
     let db = &state.database;
 
@@ -446,7 +366,7 @@ async fn delete_search_context(
     state: Data<Arc<AppState>>,
 ) -> Result<impl Responder, AppError> {
     log::debug!("delete");
-    let login_cookie = state.verify_user(req)?;
+    let login_cookie = state.verify_user(req).await?;
 
     let user = &login_cookie.user;
 
@@ -465,7 +385,7 @@ async fn delete_search_context(
 //     req: HttpRequest,
 //     state: Data<Arc<AppState>>,
 // ) -> Result<impl Responder, AppError> {
-//     let login_cookie = state.verify_user(req)?;
+//     let login_cookie = state.verify_user(req).await?;
 //     let user = &login_cookie.user;
 
 //     let database = &state.database;
@@ -478,10 +398,7 @@ async fn delete_search_context(
 // #[get("create_search")]
 
 pub async fn serve(addr: (&str, u16), database: Database) -> Result<(), anyhow::Error> {
-    let app_data = AppState {
-        database,
-        login_cache: Mutex::new(BTreeMap::new()),
-    };
+    let app_data = AppState::new(database);
     let app_data = Arc::new(app_data);
 
     std::env::set_var("RUST_LOG", "info,debug,actix_web=info,debug");
