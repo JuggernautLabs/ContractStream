@@ -63,10 +63,14 @@ impl ResponseError for AppError {
 
 pub struct AppState {
     pub database: Database,
-    login_cache: DashMap<SessionId, Arc<LoginCookie>>,
     username_session: DashMap<Username, SessionId>,
+
+    login_cache: DashMap<SessionId, Arc<LoginCookie>>,
 }
 
+/// Keeps track of a user's session with double indirection
+/// If a user is logging in we check `username_session` to see if the user has already logged in
+/// if not, the user is added to
 impl AppState {
     pub async fn is_logged_in(&self, user: &VerifiedUser) -> Option<SessionId> {
         let res = self
@@ -89,7 +93,6 @@ impl AppState {
         res
     }
     pub async fn login(&self, user: VerifiedUser) -> Result<Arc<LoginCookie>, AppError> {
-        log::info!("Logging in user: {}", user.0.username);
         if let Some(session_id) = self.is_logged_in(&user).await {
             let res: Result<Arc<LoginCookie>, AppError> = self
                 .login_cache
@@ -99,10 +102,13 @@ impl AppState {
                 .ok_or(AppError::InvalidSession);
             res
         } else {
-            let cookie = LoginCookie::new(user, Duration::hours(1));
-            let session_cookie = Arc::new(cookie);
-            self.login_cache
-                .insert(session_cookie.cookie_id.to_string(), session_cookie.clone());
+            let username = user.0.username.clone();
+            let session_cookie = Arc::new(LoginCookie::new(user, Duration::hours(1)));
+
+            let session_id: SessionId = session_cookie.cookie_id.to_string();
+
+            self.username_session.insert(username, session_id.clone());
+            self.login_cache.insert(session_id, session_cookie.clone());
             Ok(session_cookie)
         }
     }
