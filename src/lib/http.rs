@@ -403,7 +403,7 @@ pub async fn serve(addr: (&str, u16), database: Database) -> Result<(), anyhow::
     let app_data = AppState::new(database);
     let app_data = Arc::new(app_data);
 
-    std::env::set_var("RUST_LOG", "info,debug,actix_web=info,debug");
+    std::env::set_var("RUST_LOG", "log,info,debug,actix_web=info,debug,log");
     env_logger::init();
 
     HttpServer::new(move || {
