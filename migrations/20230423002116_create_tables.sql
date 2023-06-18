@@ -37,9 +37,11 @@ CREATE TABLE IF NOT EXISTS PendingJobs (
 );
 
 CREATE TABLE IF NOT EXISTS DecidedJobs (
+    user_id INTEGER REFERENCES Users(user_id),
+    job_id INTEGER REFERENCES Jobs(job_id),
     accepted BOOLEAN NOT NULL,
     PRIMARY KEY (user_id, job_id)
-)   INHERITS(PendingJobs);
+);
 
 CREATE TABLE IF NOT EXISTS KMeansClasses (
     user_id INTEGER REFERENCES Users(user_id),
