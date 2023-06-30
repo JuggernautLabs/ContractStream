@@ -87,12 +87,21 @@ impl AppState {
     pub async fn verify_user(&self, req: HttpRequest) -> Result<Arc<LoginCookie>, AppError> {
         let cookie = req
             .cookie("session_id")
-            .ok_or_else(|| req.headers().get(HEADER_SESSION_COOKIE))
-            .map_err(|_| AppError::InvalidSession)?;
-        let session_id = cookie.value();
+            .map(|cookie| cookie.value().to_owned())
+            .or_else(|| {
+                let headers = req.headers().get(HEADER_SESSION_COOKIE)?;
+                let value = headers.to_str();
+                match value {
+                    Ok(s) => Some(s.into()),
+                    Err(_) => None,
+                }
+            })
+            .ok_or(AppError::InvalidSession)?;
+
+        let session_id = cookie;
         let res: Result<Arc<LoginCookie>, AppError> = self
             .login_cache
-            .get(session_id)
+            .get(&session_id)
             .as_deref()
             .cloned()
             .ok_or(AppError::InvalidSession);
