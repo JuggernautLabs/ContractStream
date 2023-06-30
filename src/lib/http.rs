@@ -4,6 +4,7 @@
 // pending_job_actions = (reject, proposal)
 // request_proposal(job_id)
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use actix_cors::Cors;
@@ -15,6 +16,7 @@ use anyhow::anyhow;
 use futures::future::try_join_all;
 use futures::{StreamExt, TryStreamExt};
 
+use reqwest::header::{HeaderName, HeaderValue, SET_COOKIE};
 use ts_rs::TS;
 
 use actix_web::{
@@ -27,7 +29,7 @@ use actix_web::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::appstate::{AppError, AppState};
+use crate::appstate::{AppError, AppState, HEADER_SET_SESSION};
 use crate::db::{Database, Job, SearchContext};
 use crate::db_utils::FetchId;
 
@@ -57,6 +59,11 @@ async fn login(
 
     let login_cookie = state.login(user).await?;
     let cookie = Cookie::build("session_id", login_cookie.cookie_id.to_string()).finish();
+    let headers = res.headers_mut();
+    headers.append(
+        HeaderName::from_str(HEADER_SET_SESSION.into()).unwrap(),
+        HeaderValue::from_str(&cookie.to_string()).unwrap(),
+    );
     res.add_cookie(&cookie).unwrap();
 
     Ok(res)

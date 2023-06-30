@@ -11,6 +11,9 @@ use uuid::Uuid;
 
 use crate::db::{Database, VerifiedUser};
 
+pub static HEADER_SET_SESSION: &str = "Set-Session-Cookie";
+pub static HEADER_SESSION_COOKIE: &str = "Session-Cookie";
+
 type SessionId = String;
 type Username = String;
 #[derive(PartialEq)]
@@ -82,7 +85,10 @@ impl AppState {
         res
     }
     pub async fn verify_user(&self, req: HttpRequest) -> Result<Arc<LoginCookie>, AppError> {
-        let cookie = req.cookie("session_id").ok_or(AppError::InvalidSession)?;
+        let cookie = req
+            .cookie("session_id")
+            .ok_or_else(|| req.headers().get(HEADER_SESSION_COOKIE))
+            .map_err(|_| AppError::InvalidSession)?;
         let session_id = cookie.value();
         let res: Result<Arc<LoginCookie>, AppError> = self
             .login_cache
